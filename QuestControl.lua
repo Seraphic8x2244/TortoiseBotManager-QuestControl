@@ -1,5 +1,4 @@
--- QuestControl: message-handling foundation for Vanilla WoW 1.12.1 (Lua 5.0.3).
--- Quest state and reward delivery are implemented; UI follows in Chunk 3.
+-- QuestControl: quest messages, hand-in state and reward UI for Vanilla WoW 1.12.1 (Lua 5.0.3).
 TortoiseBotQuestControl = TortoiseBotQuestControl or {}
 local QC = TortoiseBotQuestControl
 
@@ -170,7 +169,7 @@ function QC.GetHideBotQuestMessages()
         TortoiseBotQuestControlDB.hideBotQuestMessages == true or false
 end
 
--- The Chunk 3 checkbox will call this setter. It affects display only.
+-- The checkbox changes display only; recognition and state delivery remain independent.
 function QC.SetHideBotQuestMessages(hidden)
     if not TortoiseBotQuestControlDB then TortoiseBotQuestControlDB = {} end
     TortoiseBotQuestControlDB.hideBotQuestMessages = hidden and true or false
@@ -275,7 +274,7 @@ local function trackedBots()
     return result
 end
 
--- Public read-only-by-convention data for the Chunk 3 window.
+-- Public read-only-by-convention data for the quest window.
 -- row = { key, title, questId?, questLink?, botNames, bots[name] = cell }
 -- cell = { botInfo, status, rewardOptions?, selected?, received?, outcome? }
 function QC.GetQuestRows()
@@ -301,7 +300,7 @@ function QC.GetBotColumns()
 end
 
 local function stateChanged()
-    -- The presentation layer will own rendering; no UI is created in Chunk 2.
+    -- State changes notify the presentation layer; they never change parsing.
     if QC.OnStateChanged then QC.OnStateChanged() end
 end
 
@@ -374,7 +373,7 @@ local function finishCell(row, cell, outcome, item)
     stateChanged()
 end
 
--- Clicking a Chunk 3 reward icon calls this API with the row key, bot name and
+-- Clicking a reward icon calls this API with the row key, bot name and
 -- index into that bot's actual linked options. Never rebuild the hyperlink.
 function QC.ChooseReward(rowKey, botName, optionIndex)
     if type(optionIndex) ~= "number" or optionIndex < 1 or
@@ -453,6 +452,409 @@ local function installHandInHook()
     QC._handInHookInstalled = true
 end
 
+
+-- Chunk 3: display only. All quest state and original-link commands remain
+-- owned by the core QC functions above; the UI never parses chat itself.
+local L = QC.L
+local UI_W, UI_H = 690, 470
+local VIEW_W, VIEW_H = 636, 320
+local QUEST_W, BOT_W = 192, 144
+local ICON_SIZE, ICON_STEP, HEADER_H = 28, 32, 46
+local CLASS_TOKENS = {
+    [1] = "WARRIOR", [2] = "PALADIN", [3] = "HUNTER",
+    [4] = "ROGUE", [5] = "PRIEST", [7] = "SHAMAN",
+    [8] = "MAGE", [9] = "WARLOCK", [11] = "DRUID",
+}
+local CLASS_COORDS = {
+    WARRIOR = { 0, 0.25, 0, 0.25 }, MAGE = { 0.25, 0.5, 0, 0.25 },
+    ROGUE = { 0.5, 0.75, 0, 0.25 }, DRUID = { 0.75, 1, 0, 0.25 },
+    HUNTER = { 0, 0.25, 0.25, 0.5 }, SHAMAN = { 0.25, 0.5, 0.25, 0.5 },
+    PRIEST = { 0.5, 0.75, 0.25, 0.5 }, WARLOCK = { 0.75, 1, 0.25, 0.5 },
+    PALADIN = { 0, 0.25, 0.5, 0.75 },
+}
+local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical, uiCheckbox
+local headerWidgets, rowWidgets = {}, {}
+local newestDisplayedKey = 0
+
+local function palette(name, fallback)
+    local tb = TortoiseBots
+    return tb and tb.C and tb.C.COLOR and tb.C.COLOR[name] or fallback
+end
+
+local function panelBackdrop(frame, alpha)
+    local tb = TortoiseBots
+    if tb and tb.ApplyBackdrop then
+        tb.ApplyBackdrop(frame, alpha or 0.96, 0.85)
+    else
+        frame:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 11,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        frame:SetBackdropColor(0.025, 0.032, 0.045, alpha or 0.96)
+        frame:SetBackdropBorderColor(0.48, 0.36, 0.15, 0.85)
+    end
+end
+
+local function font(parent, template, width)
+    local label = parent:CreateFontString(nil, "OVERLAY", template)
+    if width then label:SetWidth(width) end
+    label:SetJustifyH("LEFT")
+    return label
+end
+
+local function classAppearance(info, texture, nameLabel)
+    local token = CLASS_TOKENS[info.classId]
+    if not token and type(info.className) == "string" then
+        token = string.upper(info.className)
+    end
+    local coords = (CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[token])
+        or CLASS_COORDS[token]
+    if coords then
+        texture:SetTexture("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes")
+        texture:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+        texture:Show()
+    else
+        texture:Hide()
+    end
+    local tb = TortoiseBots
+    local c = tb and tb.GetClassColor and tb.GetClassColor(info.classId)
+        or palette("text", { 0.92, 0.90, 0.84 })
+    nameLabel:SetTextColor(c[1], c[2], c[3])
+end
+
+local function itemTexture(option)
+    -- Vanilla GetItemInfo's tenth return value is the item texture.
+    -- Never substitute a quest database item for the bot's original link.
+    local texture
+    if GetItemInfo then
+        local name, link, quality, level, minLevel, kind, subKind, stack, equip, icon =
+            GetItemInfo(option.link)
+        texture = icon
+    end
+    if not texture and GetItemIcon then texture = GetItemIcon(option.id) end
+    return texture or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+local function createRewardButton(parent)
+    local button = CreateFrame("Button", nil, parent)
+    button:SetWidth(ICON_SIZE); button:SetHeight(ICON_SIZE)
+    button:RegisterForClicks("LeftButtonUp")
+    button:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    button:SetBackdropColor(0.04, 0.04, 0.04, 0.90)
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -2)
+    icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.icon = icon
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints(button)
+    highlight:SetTexture(1, 0.84, 0.35, 0.22)
+    button:SetScript("OnClick", function()
+        QC.ChooseReward(this.rowKey, this.botName, this.optionIndex)
+    end)
+    button:SetScript("OnEnter", function()
+        if this.option then
+            this.icon:SetTexture(itemTexture(this.option))
+            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(this.option.link)
+            GameTooltip:Show()
+        end
+    end)
+    button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return button
+end
+
+local function createBotCell(row)
+    local panel = CreateFrame("Frame", nil, row.frame)
+    panelBackdrop(panel, 0.38)
+    local status = font(panel, "GameFontHighlightSmall", BOT_W - 14)
+    status:SetPoint("TOPLEFT", panel, "TOPLEFT", 7, -9)
+    return { frame = panel, status = status, icons = {} }
+end
+
+local function renderBotCell(widget, row, botName, colIndex, height)
+    local cell = widget.cells[colIndex]
+    if not cell then
+        cell = createBotCell(widget)
+        widget.cells[colIndex] = cell
+    end
+    local panel = cell.frame
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", widget.frame, "TOPLEFT",
+        QUEST_W + (colIndex - 1) * BOT_W, -2)
+    panel:SetWidth(BOT_W - 2); panel:SetHeight(height - 3)
+    panel:Show()
+    local data = row.bots[botName]
+    local options = data and data.rewardOptions
+    local selectable = data and (data.status == "choices" or
+        data.status == "awaiting_ack") and options and table.getn(options) > 0
+    if not data then
+        cell.status:SetText(L.STATUS_NOT_TRACKED)
+    elseif selectable and data.status == "awaiting_ack" then
+        cell.status:SetText(L.STATUS_AWAITING)
+    elseif selectable then
+        cell.status:SetText(L.STATUS_CHOOSE)
+    else
+        cell.status:SetText(data and data.status == "resolved" and L.STATUS_RESOLVED
+            or L.STATUS_WAITING)
+    end
+    for _, button in ipairs(cell.icons) do button:Hide() end
+    if selectable then
+        for i, option in ipairs(options) do
+            local button = cell.icons[i]
+            if not button then
+                button = createRewardButton(panel)
+                cell.icons[i] = button
+            end
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", panel, "TOPLEFT",
+                7 + math.mod(i - 1, 4) * ICON_STEP,
+                -24 - math.floor((i - 1) / 4) * ICON_STEP)
+            button.rowKey = row.key
+            button.botName = botName
+            button.optionIndex = i
+            button.option = option
+            button.icon:SetTexture(itemTexture(option))
+            if data.selected and data.selected == option then
+                button:SetBackdropBorderColor(1, 0.84, 0.35, 1)
+            else
+                button:SetBackdropBorderColor(0.48, 0.36, 0.15, 0.85)
+            end
+            button:Show()
+        end
+    end
+end
+
+local function createRow()
+    local frame = CreateFrame("Frame", nil, uiContent)
+    panelBackdrop(frame, 0.60)
+    local title = font(frame, "GameFontNormalSmall", QUEST_W - 18)
+    title:SetPoint("TOPLEFT", frame, "TOPLEFT", 9, -9)
+    local widget = { frame = frame, title = title, cells = {} }
+    table.insert(rowWidgets, widget)
+    return widget
+end
+
+local function renderHeader(info, index)
+    local widget = headerWidgets[index]
+    if not widget then
+        local frame = CreateFrame("Frame", nil, uiContent)
+        panelBackdrop(frame, 0.65)
+        local texture = frame:CreateTexture(nil, "ARTWORK")
+        texture:SetWidth(19); texture:SetHeight(19)
+        texture:SetPoint("LEFT", frame, "LEFT", 6, 0)
+        local name = font(frame, "GameFontNormalSmall", BOT_W - 34)
+        name:SetPoint("LEFT", texture, "RIGHT", 5, 0)
+        widget = { frame = frame, texture = texture, name = name }
+        headerWidgets[index] = widget
+    end
+    widget.frame:ClearAllPoints()
+    widget.frame:SetPoint("TOPLEFT", uiContent, "TOPLEFT",
+        QUEST_W + (index - 1) * BOT_W, -3)
+    widget.frame:SetWidth(BOT_W - 2); widget.frame:SetHeight(HEADER_H - 7)
+    widget.name:SetText(info.name)
+    classAppearance(info, widget.texture, widget.name)
+    widget.frame:Show()
+end
+
+local function rowHeight(row)
+    local lines = 0
+    for _, name in ipairs(row.botNames) do
+        local cell = row.bots[name]
+        if cell and cell.rewardOptions and
+            (cell.status == "choices" or cell.status == "awaiting_ack") then
+            lines = math.max(lines, math.ceil(table.getn(cell.rewardOptions) / 4))
+        end
+    end
+    return math.max(55, 31 + lines * ICON_STEP)
+end
+
+function QC.RefreshUI()
+    if not uiWindow then return end
+    local rows, columns = QC.GetQuestRows(), QC.GetBotColumns()
+    local contentWidth = math.max(VIEW_W, QUEST_W + table.getn(columns) * BOT_W)
+    uiContent:SetWidth(contentWidth)
+    if table.getn(rows) == 0 then
+        uiWindow.emptyLabel:Show()
+    else
+        uiWindow.emptyLabel:Hide()
+    end
+    for _, header in ipairs(headerWidgets) do header.frame:Hide() end
+    for i, bot in ipairs(columns) do renderHeader(bot, i) end
+    local y = HEADER_H
+    for i, row in ipairs(rows) do
+        local widget = rowWidgets[i] or createRow()
+        local height = rowHeight(row)
+        widget.frame:ClearAllPoints()
+        widget.frame:SetPoint("TOPLEFT", uiContent, "TOPLEFT", 0, -y)
+        widget.frame:SetWidth(contentWidth); widget.frame:SetHeight(height)
+        widget.title:SetText(row.title)
+        widget.title:SetHeight(height - 16)
+        for _, cell in ipairs(widget.cells) do cell.frame:Hide() end
+        for j, bot in ipairs(columns) do
+            renderBotCell(widget, row, bot.name, j, height)
+        end
+        widget.frame:Show()
+        y = y + height + 3
+    end
+    for i = table.getn(rows) + 1, table.getn(rowWidgets) do
+        rowWidgets[i].frame:Hide()
+    end
+    local contentHeight = math.max(VIEW_H, y + 12)
+    uiContent:SetHeight(contentHeight)
+    local horizontalMax = math.max(0, contentWidth - VIEW_W)
+    local verticalMax = math.max(0, contentHeight - VIEW_H)
+    uiHorizontal:SetMinMaxValues(0, horizontalMax)
+    uiVertical:SetMinMaxValues(0, verticalMax)
+    uiHorizontal:SetValue(math.min(uiHorizontal:GetValue(), horizontalMax))
+    uiVertical:SetValue(math.min(uiVertical:GetValue(), verticalMax))
+    uiScroll:SetHorizontalScroll(uiHorizontal:GetValue())
+    uiScroll:SetVerticalScroll(uiVertical:GetValue())
+    if horizontalMax > 0 then uiHorizontal:Show() else uiHorizontal:Hide() end
+    if verticalMax > 0 then uiVertical:Show() else uiVertical:Hide() end
+    uiCheckbox:SetChecked(QC.GetHideBotQuestMessages())
+end
+
+local function createScrollSlider(parent, orientation, width, height)
+    local slider = CreateFrame("Slider", nil, parent)
+    slider:SetOrientation(orientation)
+    slider:SetWidth(width); slider:SetHeight(height)
+    slider:SetMinMaxValues(0, 0)
+    slider:SetValueStep(24)
+    slider:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
+    })
+    slider:SetBackdropColor(0.10, 0.09, 0.07, 0.9)
+    slider:SetBackdropBorderColor(0.48, 0.36, 0.15, 0.9)
+    slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    return slider
+end
+
+function QC.InitUI()
+    if uiWindow then return end
+    local window = CreateFrame("Frame", "TortoiseBotQuestControlFrame", UIParent)
+    uiWindow = window
+    window:SetWidth(UI_W); window:SetHeight(UI_H)
+    window:SetPoint("CENTER", UIParent, "CENTER", 0, 30)
+    window:SetFrameStrata("DIALOG")
+    window:SetMovable(true)
+    window:SetClampedToScreen(true)
+    window:EnableMouse(true)
+    panelBackdrop(window, 0.98)
+    if UISpecialFrames then
+        table.insert(UISpecialFrames, "TortoiseBotQuestControlFrame")
+    end
+    local drag = CreateFrame("Frame", nil, window)
+    drag:SetPoint("TOPLEFT", window, "TOPLEFT", 0, 0)
+    drag:SetPoint("TOPRIGHT", window, "TOPRIGHT", -34, 0)
+    drag:SetHeight(38); drag:EnableMouse(true)
+    drag:RegisterForDrag("LeftButton")
+    drag:SetScript("OnDragStart", function() window:StartMoving() end)
+    drag:SetScript("OnDragStop", function()
+        window:StopMovingOrSizing()
+        -- In WoW 1.12 GetPoint() after StopMovingOrSizing() can crash.
+        local left, top = window:GetLeft(), window:GetTop()
+        if left and top then
+            window:ClearAllPoints()
+            window:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        end
+    end)
+    local logo = window:CreateTexture(nil, "ARTWORK")
+    logo:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Turtle")
+    logo:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    logo:SetWidth(23); logo:SetHeight(23)
+    logo:SetPoint("TOPLEFT", window, "TOPLEFT", 12, -7)
+    local title = font(window, "GameFontNormalLarge")
+    title:SetPoint("LEFT", logo, "RIGHT", 6, 5)
+    title:SetText("|cffd8a657Tortoise|r|cff4ecb5aBots|r |cfffff2cc"
+        .. L.WINDOW_TITLE .. "|r")
+    local version = font(window, "GameFontHighlightSmall")
+    version:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
+    version:SetText("v" .. (QC.version or "?"))
+    local close = CreateFrame("Button", nil, window, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", window, "TOPRIGHT", -3, -2)
+    close:SetFrameLevel(drag:GetFrameLevel() + 2)
+    local divider = window:CreateTexture(nil, "ARTWORK")
+    divider:SetPoint("TOPLEFT", window, "TOPLEFT", 12, -42)
+    divider:SetPoint("TOPRIGHT", window, "TOPRIGHT", -12, -42)
+    divider:SetHeight(1); divider:SetTexture(0.48, 0.36, 0.15, 0.7)
+    local scroll = CreateFrame("ScrollFrame", nil, window)
+    scroll:SetPoint("TOPLEFT", window, "TOPLEFT", 12, -55)
+    scroll:SetWidth(VIEW_W); scroll:SetHeight(VIEW_H)
+    uiScroll = scroll
+    local body = CreateFrame("Frame", nil, scroll)
+    body:SetWidth(VIEW_W); body:SetHeight(VIEW_H)
+    scroll:SetScrollChild(body)
+    uiContent = body
+    local questLabel = font(body, "GameFontNormalSmall", QUEST_W - 16)
+    questLabel:SetPoint("TOPLEFT", body, "TOPLEFT", 10, -14)
+    questLabel:SetText(L.QUEST_HEADER)
+    local gold = palette("gold", { 0.95, 0.72, 0.28 })
+    questLabel:SetTextColor(gold[1], gold[2], gold[3])
+    local empty = font(body, "GameFontHighlightSmall", VIEW_W - 32)
+    empty:SetPoint("TOPLEFT", body, "TOPLEFT", 12, -69)
+    empty:SetText(L.EMPTY_ROWS)
+    window.emptyLabel = empty
+    local vert = createScrollSlider(window, "VERTICAL", 15, VIEW_H - 8)
+    vert:SetPoint("TOPRIGHT", window, "TOPRIGHT", -13, -59)
+    vert:SetScript("OnValueChanged", function()
+        scroll:SetVerticalScroll(this:GetValue())
+    end)
+    uiVertical = vert
+    local horiz = createScrollSlider(window, "HORIZONTAL", VIEW_W, 14)
+    horiz:SetPoint("TOPLEFT", scroll, "BOTTOMLEFT", 0, -4)
+    horiz:SetScript("OnValueChanged", function()
+        scroll:SetHorizontalScroll(this:GetValue())
+    end)
+    uiHorizontal = horiz
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function()
+        vert:SetValue(vert:GetValue() - arg1 * 45)
+    end)
+    local checkbox = CreateFrame("CheckButton", nil, window, "UICheckButtonTemplate")
+    checkbox:SetWidth(24); checkbox:SetHeight(24)
+    checkbox:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 9, 7)
+    local checkboxText = font(window, "GameFontHighlightSmall")
+    checkboxText:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
+    checkboxText:SetText(L.HIDE_BOT_QUEST_MESSAGES)
+    checkbox:SetScript("OnClick", function()
+        QC.SetHideBotQuestMessages(this:GetChecked())
+    end)
+    uiCheckbox = checkbox
+    SLASH_TBMQ1 = "/tbmq"
+    SlashCmdList["TBMQ"] = function()
+        if uiWindow:IsShown() then
+            uiWindow:Hide()
+        else
+            QC.RefreshUI()
+            uiWindow:Show()
+        end
+    end
+    QC.RefreshUI()
+    window:Hide()
+end
+
+function QC.OnStateChanged()
+    local isNew = false
+    for _, row in ipairs(QC.GetQuestRows()) do
+        if row.key > newestDisplayedKey then
+            newestDisplayedKey = row.key
+            isNew = true
+        end
+    end
+    if not uiWindow then QC.InitUI() end
+    QC.RefreshUI()
+    -- New hand-ins open the panel; bot replies cannot reopen a closed panel.
+    if isNew then uiWindow:Show() end
+end
+
 local events = CreateFrame("Frame", "TortoiseBotQuestControlEvents")
 events:RegisterEvent("ADDON_LOADED")
 for channel in pairs(CHANNELS) do events:RegisterEvent(channel) end
@@ -467,6 +869,7 @@ events:SetScript("OnEvent", function()
             end
             installChatVisibilityFilter()
             installHandInHook()
+            QC.InitUI()
         end
     elseif CHANNELS[event] then
         QC.ReceiveChat(event, arg1, arg2)
