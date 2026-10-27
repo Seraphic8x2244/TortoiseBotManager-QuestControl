@@ -29,11 +29,11 @@ All three fixed implementation chunks now exist on `dev`. Chunk 3 adds the TBM-s
 > Single live development/status document for TortoiseBotManager-QuestControl. Structure adapted from `Seraphic8x2244/VanillaTemplate/DEV_PROGRESS.md`; canonical `dev_rulebook.md` copied unchanged from the same template.
 
 ## Current
-- Branch: **`dev`**. Verified Chunk 3 starting HEAD: **`292db94d7a9845553c9918dd43aacaa1203fceea`** (identical to remote `dev` before changes). Last code commit: **`86ca87998fb34cd58df2e14325522bc8135fb46e`**. README commit: **`3a61c448fe176c4185d2ae89ccade8ecda0a3514`**. The handoff commit is the commit carrying this document; verify remote HEAD on resume.
+- Branch: **`dev`**. **2026-10-27 Chunk 3 stabilization starting HEAD verified as `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd`** (remote `dev`, before this documentation-only update). Last addon code commit: **`86ca87998fb34cd58df2e14325522bc8135fb46e`**; latest preceding status commit: **`10270cfb5cccfc7bac72e57f1f75f1d618a82fdd`**. The current handoff commit carries this document; verify its exact remote HEAD on resume.
 - Version: **`0.1.2-dev`** from `TortoiseBotManager-QuestControl.toc`, `Interface: 11200`.
 - Stable/runtime baseline: **None**. `main` remains README-only at `c1917adea82893919c987e492cce90e7b543ebcc`.
 - Goal: Vanilla 1.12.1 TBM-styled, quest-by-bot reward UI and selective quest-chat hiding.
-- Current state: **All 3 fixed chunks implemented on `dev`**; 20 read-only static source assertions passed after final integration. **Lua 5.0.3 compiler and gameplay/runtime tests NOT run.** This is a candidate for the *first* integrated user runtime test, not a stable or released build.
+- Current state: **All 3 fixed chunks implemented on `dev`**. Historical Chunk 3 checks: 20 read-only source assertions. At verified stabilization starting HEAD `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd`, 15 additional read-only source checks passed (15/15, no failures). **Lua compiler and gameplay/runtime tests NOT run.** No confirmed runtime defect and no code change during this checkpoint. Candidate for the *first* integrated user runtime test, not stable or released.
 
 ## Current Design / Development Contract
 
@@ -92,7 +92,8 @@ All three fixed implementation chunks now exist on `dev`. Chunk 3 adds the TBM-s
 - `e02008aa7bbbb1bd9259ab42a0359b623cd89e17` — TBM-style UI, class headers, per-bot rewards, scrolling, checkbox and integration.
 - `3a61c448fe176c4185d2ae89ccade8ecda0a3514` — README window usage and testing status.
 - `86ca87998fb34cd58df2e14325522bc8135fb46e` — extract original item-link payload for native tooltip API.
-- Handoff/status-only commit: this `DEV_PROGRESS.md` revision (verify exact remote `dev` HEAD).
+- `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd` — latest prior handoff cleanup; verified actual `dev` HEAD on 2026-10-27.
+- Stabilization status-only commit: this `DEV_PROGRESS.md` revision (verify exact remote `dev` HEAD).
 
 ## Completed / User-Verified
 - Fixed three-chunk scope preserved; Chunks 1 and 2 bot-attributed parser, hand-in rows, per-bot state, reward selection and exact original-link whispers remain intact.
@@ -111,8 +112,9 @@ All three fixed implementation chunks now exist on `dev`. Chunk 3 adds the TBM-s
 - **Chunk 1 passed:** 13 preexisting source assertions (historical).
 - **Chunk 2 passed:** 10 preexisting structural assertions (historical).
 - **Chunk 3 passed:** 20 read-only source assertions, covering **byte-for-byte equality of the original parser/reward business logic after comment-only normalization**, exact linked whisper, state ownership and callback, hand-in hook initialization, 1 checkbox, tooltip payload taken from original link, per-bot link-based icons, class headers, two-axis scroll, loader/version, all new localized strings, no obvious later-Lua syntax/APIs, no speculative timeout code, and a GitHub comparison confirming only intended files changed. Total `local` tokens counted in file: 145 (a coarse source observation, **not** a Lua compiler limit proof).
-- **Lua 5.0.3 compiler: NOT RUN / UNAVAILABLE here.** Host `cc` exists, but the canonical VanillaTemplate `tools/lua50` checker is not present in the executable filesystem, direct GitHub access from the shell fails DNS, and no `luac5.0` or `lua5.0` exists. The GitHub connector can read sources but cannot turn them into an executable checker in this shell. **No compiler pass claimed.**
-- **Runtime/in-game tests: NOT RUN** (prohibited until all three chunks were implemented; first test is now permitted).
+- **Lua 5.0.x compiler: NOT RUN / UNAVAILABLE here.** Host `cc` exists, but the VanillaTemplate `tools/lua50` checker is not mounted in the executable filesystem, shell GitHub access fails DNS, and no `luac5.0` or `lua5.0` exists. The GitHub connector can read sources but cannot place the vendored compiler files in this shell. The template checker's README currently identifies its vendor distribution as **Lua 5.0.2**, while the canonical rulebook refers to **5.0.3**; no checker execution or compiler pass is claimed. Do not edit the rulebook to reconcile this.
+- **2026-10-27 first stabilization checkpoint:** verified `dev` HEAD `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd` and `.toc` version `0.1.2-dev`; **15/15 additional read-only source checks passed**, including loader order, metadata, hide/parse independence, objective vs turn-in distinction, `GetQuestReward` chain, untouched original-item-link whisper, ack matching, native tooltip link, auto-open and single master checkbox. These are **static checks only**, not Lua compiler or in-game runtime checks.
+- **Runtime/in-game tests: NOT RUN.** All three chunks now exist, so user runtime testing is permitted, but the assistant's executable environment lacks a WoW 1.12.1 client, active TortoiseBots server and TBM play session. Do not infer pass/fail or change quest/reward logic without actual reproduction.
 - GitHub diff from verified starting HEAD to current pre-handoff code head: 5 commits, changes restricted to `QuestControl.lua`, `locales/enUS.lua`, `TortoiseBotManager-QuestControl.toc`, and `README.md`; `dev_rulebook.md` untouched.
 
 ## Current Issues
@@ -120,11 +122,12 @@ All three fixed implementation chunks now exist on `dev`. Chunk 3 adds the TBM-s
 - Linkless same-item acknowledgements for the same bot choose the oldest pending matching selection; actual response ordering is untested.
 - Multi-line reward delivery, party/raid/whisper sender attribution, TBM roster readiness, optional TBM dependency, auto-pick outcome and chat-filter coexistence remain untested.
 - UI-specific: exact 1.12 class atlas coordinates, scroll frame/slider behavior, checkbox persistence and tooltip parsing are not runtime tested. Uncached item links can show a question-mark texture until the item is cached and the UI redraws. No speculative polling or refresh timeouts added.
-- No Lua 5.0.3 compiler run; static assertions are not gameplay or compiler validation.
+- No Lua 5.0.x compiler run; static assertions are not gameplay or compiler validation.
+- **2026-10-27 environment blocker:** no in-game Vanilla WoW client/session accessible to the assistant; actual user-driven first integrated tests are still required. No confirmed integration defect to fix yet.
 
 ## Testing
 ### Last Runtime Test
-- **None**. Version/commit tested in the game: **none**. Passed: none; failed: none.
+- **None** as of 2026-10-27. Version/commit tested in the game: **none**. Passed: none; failed: none. The reviewed candidate is `0.1.2-dev` at `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd`; static review does not make it a tested build.
 
 ### Next Runtime Test — first full integrated Chunk 3 validation
 1. Load `0.1.2-dev` with TBM on actual WoW 1.12.1. Open/close via `/tbmq`, drag/close/Escape and verify only one master checkbox persists across reloads.
@@ -136,7 +139,7 @@ All three fixed implementation chunks now exist on `dev`. Chunk 3 adds the TBM-s
 Any issues discovered in these tests are **Chunk 3 stabilization**, not a fourth implementation chunk.
 
 ## Planned / Next Work
-- **All fixed implementation chunks completed.** Next action: first integrated **user** runtime test of `0.1.2-dev` after confirming the final code/handoff commit. Address confirmed defects within Chunk 3 stabilization without changing the agreed scope.
+- **All fixed implementation chunks completed.** Next action: first integrated **user** runtime test of `0.1.2-dev`, beginning with load/`/tbmq`/checkbox persistence against the unchanged addon code at `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd` (a status-only commit may follow). Collect exact steps, observed behaviour, errors and logs; address only reproduced integration defects within Chunk 3 stabilization, bumping `.toc` patch version for any addon-affecting fix.
 
 ## Deferred / Out of Scope
 - No additional chunks, server changes, quest pickup/auto-pick UI, unrelated controls, arbitrary retry/timeout machinery, architecture splitting or editing `dev_rulebook.md`.
@@ -148,5 +151,5 @@ Any issues discovered in these tests are **Chunk 3 stabilization**, not a fourth
 - `dev_rulebook.md` is unchanged. Development patch version increased from `0.1.1-dev` to `0.1.2-dev`; neither Lua compilation nor runtime compatibility may be claimed from static source assertions.
 
 ## Exact Next Step
-**Resume in a fresh chat for Chunk 3 runtime stabilization.** Read `dev_rulebook.md` and `DEV_PROGRESS.md`, verify remote `dev` HEAD and `0.1.2-dev`. Perform the numbered first end-to-end runtime checks on actual Vanilla WoW 1.12.1/TortoiseBots/TBM, report results bound to exact tested commit/version, and fix only confirmed integration issues within Chunk 3. Run canonical Lua 5.0.3 compilation whenever checker sources are accessible in an executable environment. Do not create Chunk 4 or promote to `main`.
+**Run the first user-driven Vanilla WoW 1.12.1/TortoiseBots/TBM integrated runtime test:** install/load addon `0.1.2-dev` from unchanged code HEAD `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd`, then complete numbered Testing item 1 (`/tbmq`, drag, close, Escape, master checkbox persistence). Record exact pass/fail, Lua errors, addon load state and observed UI; continue items 2–5 in sequence, and only fix confirmed Chunk 3 integration defects. On fresh-chat resume first read this status and the unchanged rulebook, verify the remote `dev` HEAD/current `.toc`, and keep code-tested SHA separate from status-only commits. Run compiler check only when compiler source is executable. Do not create Chunk 4, modify the rulebook or promote to `main`.
 
