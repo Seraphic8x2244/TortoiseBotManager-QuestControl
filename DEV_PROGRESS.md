@@ -19,11 +19,11 @@
 - **End-of-chunk handoff:** Commit coherent code/status to `dev` and update this file with branch, exact commit(s), `.toc` version, completed work, untested work, deferred work and exact next step. Keep `dev_rulebook.md` unchanged.
 - **Mandatory next-chat prompts:** At the end of Chunk 1, provide a **short copy-paste prompt for Chunk 2**. At the end of Chunk 2, provide the same for Chunk 3. Each fresh chat must read the rulebook and this status document and verify remote `dev` HEAD before changing code.
 
-### Chunk 3 stabilization — targeted row fade update pending runtime verification
+### Chunk 3 stabilization — two narrowly scoped chat filters pending runtime verification
 
-Following the `0.1.3-dev` screenshot feedback, `0.1.4-dev` changes **only resolved-row retention/presentation**: a resolved row stays fully visible for seven seconds, fades out for three seconds, and is then deleted. An unresolved or re-opened row remains opaque. Fully assumed-success silent hand-ins continue clearing immediately (no new visual noise). Fade-only resolved records are **not persisted**, so a reload does not resurrect completed rows. The unrelated `The Harvest Golem Mystery` "Hand-in / Not complete" row issue remains **unfixed** and separately tracked.
+`0.1.4-dev` added the resolved-row 7-second hold plus 3-second fade. **User has now confirmed the fade works in-game with one bot**, but multi-bot and reward outcomes are untested. `0.1.5-dev` replaces the single chat-filter checkbox with **Filter Owned Bot Messages** and **Filter Other Bot Messages**. Only recognised/parsed quest-template messages on the existing party/raid/whisper channels qualify. TBM's owned roster/claimed lookups classify the first group authoritatively. Senders outside TBM's owned roster are classified as 'other' **for filtering only**, using the same template match: this is not independent proof they are bots, so a non-bot deliberately emitting an identical template can also match. Owned-bot quest state processing remains unchanged, regardless of either filter setting. Migrate the old checkbox's value to the owned setting; default other to OFF. `The Harvest Golem Mystery` incomplete-hand-in bug remains **unfixed**.
 
-No quest classification, bot response parsing, reward commands, chat hiding, acceptance/hand-in hooks, quest chain data, or server behaviour is modified by this revision. No fourth chunk, rulebook change, release, or `main` promotion. Source-implemented; not yet Lua 5.0.3-compiled or user-runtime-verified.
+Only filter settings/UI labels, configuration migration and documentation changed. No parser, quest classification, reward commands, acceptance/hand-in hooks, quest data, server changes, rulebook changes, Chunk 4, or `main` promotion. Source-implemented; Lua 5.0.3 compiler and runtime testing of `0.1.5-dev` outstanding.
 
 ---
 
@@ -31,11 +31,11 @@ No quest classification, bot response parsing, reward commands, chat hiding, acc
 > Single live development/status document for TortoiseBotManager-QuestControl. Structure adapted from `Seraphic8x2244/VanillaTemplate/DEV_PROGRESS.md`; canonical `dev_rulebook.md` copied unchanged from the same template.
 
 ## Current
-- Branch: **`dev`**. Previous base HEAD: **`e20cf011870d44bed2b78a9442a9de75487c505d`**. **`0.1.4-dev` fade-only implementation commit: `b5d245f4c859104be1b41033322973d551b1bc04`**. This documentation-only handoff commit follows it; verify remote `dev` HEAD before future changes. `main` unchanged.
-- Version: **`0.1.4-dev`** in addon `.toc`, `Interface: 11200`. Latest **partially user-tested** version: `0.1.3-dev` (screenshot shows runtime behaviour, installed commit unverified); initial UI-tested version `0.1.2-dev`. `main` README-only; **no stable release**.
-- Current scoped goal: finish **resolved-row 10-second visibility/fade** within Chunk 3; **defer** additional fixes to quest stages and the separately reported incomplete-hand-in row until explicitly requested.
-- **All three chunks implemented; Chunk 3 feedback-driven display update in `0.1.4-dev`.** Runtime evidence on `0.1.2-dev` (UI pass, correlation/state issues) and `0.1.3-dev` (some improved quest tracking, accepted message in chat, erroneous incomplete hand-in row) applies only to those specific versions. `0.1.4-dev` fade is not yet user tested; Lua 5.0.3 compiler check outstanding.
-- Runtime provenance: screenshots show `0.1.2-dev` and a later **`0.1.3-dev`** window on Vanilla 1.12.1/TortoiseBots/TBM; exact installed source SHAs not verified. New fade in `0.1.4-dev` not yet seen in-game.
+- Branch: **`dev`**. Previous HEAD **`5b27f468d9d49c6aa217def90b2bcf523e30704a`**. **`0.1.5-dev` dual-filter implementation commit: `e09eb4d535c7657a4047dd966fe774ec4590ccc0`**. This documentation-only handoff commit follows it. Verify remote HEAD before future edits; `main` unchanged.
+- Version: **`0.1.5-dev`** in addon `.toc`, `Interface: 11200`. Latest user-tested visual feature: **one-bot fade on `0.1.4-dev` — PASS**, installed exact SHA not verified; other acceptance/reward issues remain under test. Earlier `0.1.2-dev` UI basics and `0.1.3-dev` screenshots are partial evidence. `main` README-only; **no stable release**.
+- Current scoped goal: **independent owned/other parsed-quest-message chat filters**. Preserve parsing/UI independent of suppression, retain one-bot fade success, and defer hand-in anomaly until a separate request.
+- **All three chunks implemented; `0.1.5-dev` dual-filter UI/code source-checked but not user-tested.** `0.1.4-dev` one-bot resolved-row fade **user-confirmed PASS**; multi-bot/reward fades, early accepted-message correlation and separate incorrect hand-in row remain open. Lua 5.0.3 compiler check outstanding.
+- Runtime provenance: screenshots show `0.1.2-dev` and `0.1.3-dev` windows; user explicitly reported the **`0.1.4-dev` fade working with one bot**. Exact installed source SHAs not verified. Neither filter mode in `0.1.5-dev` has been tested.
 
 ## Current Design / Development Contract
 
@@ -51,12 +51,11 @@ No quest classification, bot response parsing, reward commands, chat hiding, acc
 
 ### Invariants
 - Primary function is to **consume known bot quest notifications, update the UI, and hide them from normal chat**.
-- **One master checkbox labelled `Hide Bot Quest Messages`** controls chat suppression only:
-  - Checked: recognised bot quest messages are hidden from normal chat.
-  - Unchecked: the same messages remain visible for debugging.
-  - In both states: the parser and Quest UI continue functioning identically.
-- The master checkbox applies to all recognised bot quest messages; no per-message or per-channel controls.
-- Do not hide ordinary player chat or unrelated bot messages.
+- **Two independent account-wide suppression checkboxes** control chat visibility only:
+  - `Filter Owned Bot Messages`: TBM roster or claimed-lookup bot senders, with the former `hideBotQuestMessages` SavedVariable migrated to `filterOwnedBotMessages` (new installations default true).
+  - `Filter Other Bot Messages`: senders not found by TBM's owned lookups; `filterOtherBotMessages` defaults false. It filters **only parsed quest-template messages**, not whole senders or unrelated messages. It cannot authoritatively distinguish an unknown bot from a human intentionally repeating the exact bot quest template.
+  - Both use the existing party/raid/raid-leader/whisper channels. Filtering does **not** gate `QC.ReceiveChat`; only owned bots are delivered to quest state, regardless of either checkbox.
+- Unrecognised chat, unrelated bot messages and ordinary player conversation remain visible; a byte-for-byte matching bot quest template from an unknown sender may be hidden with the other filter enabled.
 - Keep quest/item hyperlinks intact; reward options can differ for each bot.
 
 ### Protocol / Data Model
@@ -76,7 +75,7 @@ No quest classification, bot response parsing, reward commands, chat hiding, acc
 - The server only sends linked reward choices in its selection-list path. Its auto-pick path may instead award an item without listing choices; for `!ai->IsAlt()` the investigated code auto-picks. No new server configuration behaviour is part of this plan.
 
 ### Active Decisions
-- Preserve quest-by-bot rows/columns, original reward hyperlinks/item icons, the exact `/w BotName r [original itemlink]` command, and the master checkbox's visibility-only semantics.
+- Preserve quest-by-bot rows/columns, original reward hyperlinks/item icons, the exact `/w BotName r [original itemlink]` command, and both checkboxes' visibility-only semantics.
 - **Player-first gate is invalid:** capture relevant bot chat independently (including one-message multiline reward prompt) and correlate with player accept/hand-in whether bot or player event comes first. Match by bot and quest ID/link when known, carefully fall back to title. **No quest-chain database** or guessing an unrelated quest is a follow-up.
 - **User's priority: bot acceptance confirmation.** Bots report successful acceptance; show accepted vs not-confirmed for every tracked bot when the player accepts the quest, including confirmations received earlier. A missing next acceptance suggests investigating earlier hand-in, but is **not proof** of failed hand-in.
 - **Ordinary hand-ins are presumed successful** without a mandatory bot completion message. Preserve explicit negative outcomes, reward-choice prompts and their resolution; do **not** infer a reward choice or successfully received item from silence. `Completed [quest]` objective messages remain distinct.
@@ -101,7 +100,8 @@ No quest classification, bot response parsing, reward commands, chat hiding, acc
 - `8274163a51fa2af04d0dca6245436218d1d52cc9` — initial stabilization verification/status handoff; verified `dev` HEAD before this update.
 - `21b24c1df7a1de63d0907d77e2928e7b0256d84a` — first runtime feedback and revised Chunk 3 direction, documentation-only.
 - `3622e360551e0ac63a9e2ec291295f8d0f567942` — order-independent persistent quest correlation, acceptance/recovery controls and `0.1.3-dev` code; **not yet tested in-game**.
-- `b5d245f4c859104be1b41033322973d551b1bc04` — **`0.1.4-dev` resolved-row-only 7+3 second fade**, leaving quest classification and original reward commands unchanged; runtime fade not yet tested.
+- `b5d245f4c859104be1b41033322973d551b1bc04` — **`0.1.4-dev` 7+3 second resolved-row fade**, **user confirmed one-bot fade PASS**; multi-bot/reward untested.
+- `e09eb4d535c7657a4047dd966fe774ec4590ccc0` — **`0.1.5-dev` dual owned/other parsed-message chat filters**, migration of previous preference, two UI checkboxes and labels, no quest-state change.
 
 ## Completed / User-Verified
 - Fixed three-chunk scope preserved; Chunks 1 and 2 bot-attributed parser, hand-in rows, per-bot state, reward selection and exact original-link whispers remain intact.
@@ -134,6 +134,7 @@ No quest classification, bot response parsing, reward commands, chat hiding, acc
 - **Chunk 3 passed:** 20 read-only source assertions, covering **byte-for-byte equality of the original parser/reward business logic after comment-only normalization**, exact linked whisper, state ownership and callback, hand-in hook initialization, 1 checkbox, tooltip payload taken from original link, per-bot link-based icons, class headers, two-axis scroll, loader/version, all new localized strings, no obvious later-Lua syntax/APIs, no speculative timeout code, and a GitHub comparison confirming only intended files changed. Total `local` tokens counted in file: 145 (a coarse source observation, **not** a Lua compiler limit proof).
 - **Lua 5.0.x compiler: NOT RUN / UNAVAILABLE here.** Host `cc` exists, but the VanillaTemplate `tools/lua50` checker is not mounted in the executable filesystem, shell GitHub access fails DNS, and no `luac5.0` or `lua5.0` exists. The GitHub connector can read sources but cannot place the vendored compiler files in this shell. The template checker's README currently identifies its vendor distribution as **Lua 5.0.2**, while the canonical rulebook refers to **5.0.3**; no checker execution or compiler pass is claimed. Do not edit the rulebook to reconcile this.
 - **2026-10-27 first stabilization checkpoint:** verified `dev` HEAD `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd` and `.toc` version `0.1.2-dev`; **15/15 additional read-only source checks passed**, including loader order, metadata, hide/parse independence, objective vs turn-in distinction, `GetQuestReward` chain, untouched original-item-link whisper, ack matching, native tooltip link, auto-open and single master checkbox. These are **static checks only**, not Lua compiler or in-game runtime checks.
+- **2026-10-27 `0.1.5-dev` static verification: 20/20 targeted source assertions passed**, including byte-identical parser, unchanged `ReceiveChat` and quest state, independent owned/other filter gates, legacy preference migration, default off for other, new labels and UI checkbox binding, no chat hides without successful parse, original fade retained. **No Lua 5.0.3 compiler or in-game test run on `0.1.5-dev`.**
 - **2026-10-27 `0.1.4-dev` static verification: 17/17 targeted source assertions passed**, including unchanged parser/quest classification, original reward and manual recovery whispers, 7+3 second fade arithmetic, cancelling fades if re-opened, silent hand-in clearing, no persisting completed visual-only rows, OnUpdate cleanup, row opacity reset on UI reuse, TOC bump and no new loader. **No Lua 5.0.3 compiler or in-game test was run for the fade.**
 - **2026-10-27 `0.1.3-dev` static verification: 18/18 source assertions passed** before commit: exact original parser/filter segment preserved byte-for-byte; unchanged original item-link reward whisper/tooltip; independent persistent observations and multi-pass replay; AcceptQuest/GetQuestReward wrappers; `available` never marking accepted; Accept disabled without trustworthy quest link; Talk/Accept buttons never marking success; per-character SavedVariables; X; locale keys; TOC version/loader; no obvious later-Lua syntax. **These are source checks, not a Lua 5.0.3 compiler pass nor an execution test.**
 - **Runtime tests: user performed first partial in-game test on 2026-10-27 against `0.1.2-dev`**, showing mixed results detailed below. Assistant has no client/TortoiseBots/TBM session for independent reproduction; `0.1.3-dev` remains untested.
@@ -161,6 +162,7 @@ User supplied screenshot of **The Harvest Golem Mystery**. Chat displayed Reven(
 Resolved acceptance rows disappeared immediately, leaving no useful chance to see the confirmation. **Approved narrow change:** fully resolved non-silent rows visible for 10 seconds total (7 seconds opaque, 3 seconds fade); cancel fade if row becomes unresolved; ordinary silent hand-in cleanup unchanged. An animation-only resolved row must not be saved or resurrected over reload. Version patch bump `0.1.4-dev` required; checks and in-game retest remain distinct.
 
 ## Current Issues
+- **`0.1.5-dev` chat-filter runtime checks pending:** two independent checkboxes and settings persistence; owned/other parsed-message suppression; unknown/ordinary chat stays visible; TBM not loaded results in no suppression; unaffected quest state. 'Other' is defined by absence from owned roster plus a recognised template, not independently verified bot identity.
 - **Confirmed in-game on `0.1.2-dev`, now targeted by `0.1.3-dev` fixes:** missing acceptance visibility, reward prompts/options missing after early bot events, auto-award/completion mispairing, player-first correlation vulnerability, lost pending rows on reload. **No fixed outcome has yet been runtime-confirmed.**
 - **Cause clarified by user:** the `Mazzranache` reward miss was due to bot event sequencing ahead of the player-created row, **not** multiline parsing. The reward parser has been kept unchanged in `0.1.3-dev`; runtime retest of the corrected correlation is still needed.
 - **To verify:** narrow `0.1.4-dev` fade timing/alpha/removal and unresolved-row persistence; optional client quest-link capture; whisper `talk`/`accept` response and range, especially game objects; SavedVariables replay without false matches; original reward links and choice ack; duplicate/late replies. The user explicitly approved only the resolved-row delay; **no retry or observation timer**.
@@ -169,7 +171,8 @@ Resolved acceptance rows disappeared immediately, leaving no useful chance to se
 
 ## Testing
 ### Last Runtime Test
-- **2026-10-27 — first partial user-integrated Vanilla WoW 1.12.1/TortoiseBots/TBM test, displayed `0.1.2-dev`. Installed code commit unverified.**
+- **2026-10-27 — user confirmed `0.1.4-dev` one-bot resolved-row fade behaves correctly in-game. PASS: fade with one bot only.** No claim about multi-bot, unresolved/reward rows, source SHA, or `0.1.5-dev` filtering.
+- **2026-10-27 — earlier partial user-integrated Vanilla WoW 1.12.1/TortoiseBots/TBM test, displayed `0.1.2-dev`. Installed code commit unverified.**
 - **PASS:** addon/TBM load without reported errors; `/tbmq`, window dragging, close/reopen/Escape, checkbox setting persistence across `/reload`.
 - **FAIL:** unsaved pending rows after reload; lack of bot acceptance confirmation; `Mazzranache` reward-choice and auto-award outcomes not reflected despite party/chat evidence.
 - **Observed externally:** bot acceptance can precede player notification; manual party `talk` and `accept [questlink]` needed for crate and ordinary NPC, with bots progressing differently. Individual whispers and revised UI not tested.
@@ -180,12 +183,13 @@ Resolved acceptance rows disappeared immediately, leaving no useful chance to se
 2. Reproduce `Mazzranache` single-message multi-choice prompt and rogue auto-award; verify per-bot options, native original-link tooltips, exact `r [original itemlink]` whisper and resolution.
 3. Verify ordinary NPC/crate hand-in without mandatory completion message and per-bot **whisper** `talk` then `accept [original questlink]` near targeted quest giver; no false acceptance on action click.
 4. Verify SavedVariables pending/early event/reward recovery over reload/relog, all-bots-resolved removal and deliberate row `X` deletion.
-5. Verify hide-chat parity, party/raid/whisper matching, duplicate/same-title handling, scrolling/checkbox, no Lua errors. Record exact version **and installed commit** if possible.
+5. Verify independently the **owned and other** chat filters (both on/off, recognised vs unrecognised chat, default/migrated settings through reload), party/raid/whisper matching, duplicate/same-title handling, scrolling and no Lua errors. Record exact version **and installed commit** if possible.
 
 No fourth chunk; do not infer any untested stage from an adjacent pass.
 
 ## Planned / Next Work
-- **`0.1.4-dev` needs focused in-game fade validation:** both bots accepted -> row remains full opacity 7s, fades over next 3s, disappears at ~10s; one bot unconfirmed -> row remains visible/opaque; resolved reward acknowledgement -> same fade; silent assumed-success hand-in remains immediate; reload during fade does not revive completed row; manual X works. No speculative quest stage correction in this revision.
+- **`0.1.5-dev` needs in-game dual-filter validation:** old owned-filter preference persists after update, other defaults OFF, each checkbox changes only parsed-message chat visibility, ordinary dialogue remains, and owned quest events still update state under both switch settings. Observe other-ownership path in a party/raid/whisper and confirm whether any human text resembles exact templates; note this is not an authenticated bot classifier.
+- **Continue visual checks:** one-bot fade already PASS in `0.1.4-dev`; still verify multi-bot resolved, unconfirmed persistence, reward acknowledgement and relog. Do not infer these passes from one-bot test.
 - Separately, if explicitly requested, investigate the screenshot's incomplete-hand-in row on an active quest; do not conflate with the fade change. Continue broader `0.1.3-dev` acceptance/reward/whisper/persistence retests as useful, recording exact installed commit. No Chunk 4.
 
 ## Deferred / Out of Scope
@@ -195,7 +199,7 @@ No fourth chunk; do not infer any untested stage from an adjacent pass.
 ## Release / Promotion Notes
 - `main` stays README-only; no release authorized or performed.
 - Dependencies/target: native WoW 1.12.1, Lua 5.0.3, TortoiseBots server, optional TortoiseBotsManager API for identifying/tracking bots. Missing TBM makes reliable bot identification unavailable in the existing core.
-- `dev_rulebook.md` remains unchanged. Development patch version advanced to `0.1.4-dev` for visual-only fade. Neither Lua compilation nor runtime compatibility is established by source checks.
+- `dev_rulebook.md` remains unchanged. Development patch version advanced to `0.1.5-dev` for two separate chat filters, with prior owned setting migrated. Neither Lua compilation nor runtime compatibility is established by source checks.
 
 ## Exact Next Step
-**Validate only the new `0.1.4-dev` resolved-row fade in-game:** after verifying remote `dev` HEAD and unchanged rulebook, install the patch and check 7s fully visible + 3s fade on completed acceptance/reward rows, uninterrupted display for a missing acceptance, and no persisted fading rows on reload. Do not change "Hand-in / Not complete" classification without a subsequent explicit instruction. Lua 5.0.3 compiler validation remains pending; no release/`main`/Chunk 4.
+**In-game test `0.1.5-dev` dual owned/other chat suppression, preferably using an owned bot and a bot outside TBM roster.** Both modes suppress only successfully parsed quest templates; state processing remains restricted to owned bots. Check migrated default/checkbox persistence and unrecognised chat visibility. Verify runtime version and HEAD, and do not change "Hand-in / Not complete" classification without a subsequent request. Lua 5.0.3 compiler validation remains pending; no release/`main`/Chunk 4.
