@@ -30,11 +30,43 @@ Only filter settings/UI labels, configuration migration and documentation change
 
 > Single live development/status document for TortoiseBotManager-QuestControl. Structure adapted from `Seraphic8x2244/VanillaTemplate/DEV_PROGRESS.md`; canonical `dev_rulebook.md` copied unchanged from the same template.
 
+## Approved Next Revision — Compact QuestControl UI + TBM Quest Button (`0.1.6-dev`, NOT YET IMPLEMENTED)
+
+**Scope:** A genuine replacement of the oversized ~690×470 TBM-styled QuestControl UI with a compact, functional, pfQuest_Group-inspired window. This is **approved for the next programming chat**, not part of the current shipped `0.1.5-dev` code. Use `Seraphic8x2244/pfQuest_Group` (`main`, `pfQuest_Group.lua` and `assets/`) as the implementation reference. Preserve independent addon identity and TBM quest/state ownership: no runtime dependency on pfQuest_Group, and no TBM repository modifications.
+
+### TBM header entry point
+- Create a **Quest** button, immediately **LEFT** of TBM's existing **Info** button, with visual parity to Info/Mini: `TB.StyleButton(CreateFrame("Button", nil, TB.frame, "UIPanelButtonTemplate"))`, 44×20, matching spacing, label and tooltip. **Anchor it relatively to `TB.infoButton`**, e.g. `quest:SetPoint("RIGHT", TB.infoButton, "LEFT", -4, 0)`. Do **not** use guessed absolute header coordinates or alter TBM's source.
+- TBM's `UI.lua` exposes `TB.infoButton`, `TB.dragHeader` and `TB.frame` after `TB.InitUI`. Its mouse-enabled drag header currently ends at Info; when adding Quest to the left, **re-anchor that drag-header boundary to Quest** and set the new button at an appropriate higher frame level so the overlay does not intercept clicks. Do not break Info/Mini/close or header dragging. Initialize only once when TBM UI is ready, including late UI initialization; gracefully handle absent TBM frame. Avoid stale/duplicate button creation.
+- Clicking Quest toggles the QuestControl window; preserve `/tbmq`, close and Escape behaviours.
+
+### Compact window — visual contract
+- Heavily follow **pfQuest_Group**: near-20px high rows when possible, low-profile title, minimal borders/spacing, compact scrollable body, resizing, movable/persisted position/size and optional pfUI skin where available with a native fallback. Default footprint **far smaller** than existing QuestControl, but width must accommodate full class-coloured bot names and reward icons; size should adapt gracefully to grouped bot count and available screen space rather than enforcing an unusably narrow 300px grid.
+- Preserve the **quest-row × grouped-owned-bot-column matrix**. **Only quest names and bot names as persistent visible text**. No persistent stage labels, status sentences, explanations, oversized buttons or toolbars.
+- **Quest cell:** Blizzard quest art `Interface\\GossipFrame\\AvailableQuestIcon` (`!`) for pickup/acceptance; `Interface\\GossipFrame\\ActiveQuestIcon` (`?`) for hand-in/reward context, then the quest title. Tooltip for truncated titles/context if useful.
+- **Bot headers:** existing class icon followed by **full** bot name, class-coloured. Preserve per-bot identity and usable widths, with scrolling for many bots.
+- **Bot status icons:** green tick for confirmed positive, red X for confirmed negative, neutral question mark for genuinely unconfirmed. Do not equate missing bot reply with failure. Icon hover reveals meaning.
+- **Reward selection:** **all original linked reward item icons visible directly in the relevant bot cell** (no generic reward icon and no click-to-expand step). Allow that specific row to grow/wrap only to fit item icons; item hover shows the original game item tooltip; clicking sends the exact original `/w BotName r [itemlink]` command. Preserve per-bot choice differences.
+- **Minimal recovery/removal controls, existing artwork only:** Remove = `pfQuest_Group/assets/trash-2.tga` (bin) on quest row; Talk = Blizzard `Interface\\GossipFrame\\GossipGossipIcon`; Accept = `pfQuest_Group/assets/clipboard-check.tga`. Use small icon hit targets with meaningful tooltips, show recovery only when applicable, and never imply bot success on a recovery click. Copy only the needed TGA assets into QuestControl's own `assets/` (respect upstream licence) so pfQuest_Group need not be installed. Blizzard textures stay referenced natively. No new art, speechbox/thumbsup drawing or wordy replacements.
+- **Settings:** put existing independent **Filter Owned Bot Messages** and **Filter Other Bot Messages** checkboxes behind a compact settings/gear control, away from the main quest matrix. Preserve settings values, migration and exact successfully-parsed-message-only filtering semantics.
+
+### Behaviour and scope boundaries
+- **Presentation/integration redesign only**: retain the existing order-agnostic quest observations, TBM roster/claimed authority, acceptance/recovery and per-character saved state, independent owned/other filtering, original hyperlinks/tooltips/whisper commands, manual dismissal, 7-second hold plus 3-second resolved-row fade, and silent hand-in behaviour.
+- **Do not fix or conflate** the separately reported `The Harvest Golem Mystery` erroneous *Hand-in / Not complete* row in this UI revision. Do not reinterpret bot messages, alter parser, introduce auto-accept, quest database, server changes, unrelated controls or a fourth chunk.
+- Bump addon `.toc` to **`0.1.6-dev` when implementation actually changes**, keep `dev_rulebook.md` unchanged, use only WoW 1.12.1/Lua 5.0.3 compatible APIs and update `DEV_PROGRESS.md`. No release or `main` promotion.
+
+### Acceptance / checks for next chat
+1. TBM **Quest | Info | Mini | X** button spacing/style/clicks, correct **relative Info anchoring**, drag-header hit testing, load order, TBM Mini mode, and `/tbmq` toggle.
+2. Compact pfQuest_Group-like look under one bot, multiple bots and longer class-coloured full names; move/resize/scroll/persist window size/position.
+3. Blizzard `!`/`?` quest art, per-bot green tick/red X/neutral ?, remove bin, gossip Talk, clipboard Accept; accurate hover tooltips without visible prose.
+4. Direct all-item icon reward choices, hover tooltip and exact original whisper; action availability without a captured original quest hyperlink; per-bot state.
+5. Settings gear/two independently persisted filters, chat parsing unaffected, existing 10-second resolved-row fade and manually dismissed rows.
+6. Relevant source checks and the **canonical Lua 5.0.3 compiler check when executable tools are available**. Record checks honestly; in-game validation is separate. No release.
+
 ## Current
 - Branch: **`dev`**. Previous HEAD **`5b27f468d9d49c6aa217def90b2bcf523e30704a`**. **`0.1.5-dev` dual-filter implementation commit: `e09eb4d535c7657a4047dd966fe774ec4590ccc0`**. This documentation-only handoff commit follows it. Verify remote HEAD before future edits; `main` unchanged.
 - Version: **`0.1.5-dev`** in addon `.toc`, `Interface: 11200`. Latest user-tested visual feature: **one-bot fade on `0.1.4-dev` — PASS**, installed exact SHA not verified; other acceptance/reward issues remain under test. Earlier `0.1.2-dev` UI basics and `0.1.3-dev` screenshots are partial evidence. `main` README-only; **no stable release**.
-- Current scoped goal: **independent owned/other parsed-quest-message chat filters**. Preserve parsing/UI independent of suppression, retain one-bot fade success, and defer hand-in anomaly until a separate request.
-- **All three chunks implemented; `0.1.5-dev` dual-filter UI/code source-checked but not user-tested.** `0.1.4-dev` one-bot resolved-row fade **user-confirmed PASS**; multi-bot/reward fades, early accepted-message correlation and separate incorrect hand-in row remain open. Lua 5.0.3 compiler check outstanding.
+- Current scoped goal: **approved next programming revision `0.1.6-dev`: compact pfQuest_Group-inspired QuestControl window and a TBM header Quest button positioned relative to `TB.infoButton`**. This plan is documented only, not yet implemented. Defer hand-in anomaly until a separate request.
+- **All three chunks implemented; `0.1.5-dev` dual-filter UI/code source-checked but not user-tested. Next revision `0.1.6-dev` is a documented, approved UI redesign, NOT IMPLEMENTED.** `0.1.4-dev` one-bot fade **user-confirmed PASS**; multi-bot/reward fades, early acceptance correlation and separate incorrect hand-in row remain open. Lua 5.0.3 compiler check outstanding.
 - Runtime provenance: screenshots show `0.1.2-dev` and `0.1.3-dev` windows; user explicitly reported the **`0.1.4-dev` fade working with one bot**. Exact installed source SHAs not verified. Neither filter mode in `0.1.5-dev` has been tested.
 
 ## Current Design / Development Contract
@@ -188,7 +220,8 @@ Resolved acceptance rows disappeared immediately, leaving no useful chance to se
 No fourth chunk; do not infer any untested stage from an adjacent pass.
 
 ## Planned / Next Work
-- **`0.1.5-dev` needs in-game dual-filter validation:** old owned-filter preference persists after update, other defaults OFF, each checkbox changes only parsed-message chat visibility, ordinary dialogue remains, and owned quest events still update state under both switch settings. Observe other-ownership path in a party/raid/whisper and confirm whether any human text resembles exact templates; note this is not an authenticated bot classifier.
+- **Implement the approved `0.1.6-dev` compact UI/TBM Quest button revision documented above**, with Quest anchored left of TBM's `TB.infoButton` and the drag overlay adjusted; preserve state/parsing unchanged.
+- **`0.1.5-dev` dual-filter in-game validation remains pending:** old owned-filter preference persists after update, other defaults OFF, each checkbox changes only parsed-message chat visibility, ordinary dialogue remains, and owned quest events still update state under both switch settings. Observe other-ownership path in a party/raid/whisper and confirm whether any human text resembles exact templates; note this is not an authenticated bot classifier.
 - **Continue visual checks:** one-bot fade already PASS in `0.1.4-dev`; still verify multi-bot resolved, unconfirmed persistence, reward acknowledgement and relog. Do not infer these passes from one-bot test.
 - Separately, if explicitly requested, investigate the screenshot's incomplete-hand-in row on an active quest; do not conflate with the fade change. Continue broader `0.1.3-dev` acceptance/reward/whisper/persistence retests as useful, recording exact installed commit. No Chunk 4.
 
@@ -202,4 +235,4 @@ No fourth chunk; do not infer any untested stage from an adjacent pass.
 - `dev_rulebook.md` remains unchanged. Development patch version advanced to `0.1.5-dev` for two separate chat filters, with prior owned setting migrated. Neither Lua compilation nor runtime compatibility is established by source checks.
 
 ## Exact Next Step
-**In-game test `0.1.5-dev` dual owned/other chat suppression, preferably using an owned bot and a bot outside TBM roster.** Both modes suppress only successfully parsed quest templates; state processing remains restricted to owned bots. Check migrated default/checkbox persistence and unrecognised chat visibility. Verify runtime version and HEAD, and do not change "Hand-in / Not complete" classification without a subsequent request. Lua 5.0.3 compiler validation remains pending; no release/`main`/Chunk 4.
+**Start the approved `0.1.6-dev` presentation/integration redesign on `dev` in a fresh programming chat.** Read unchanged `dev_rulebook.md` and this file, verify remote HEAD, inspect QuestControl, TBM `UI.lua` (`TB.infoButton`/`TB.dragHeader`) and `pfQuest_Group.lua`/assets. Implement TBM Quest button left of Info via relative anchor (no TBM repo modification) and replace oversized QuestControl UI with the compact quest-by-bot grid/icon controls described above. Preserve quest logic, original hyperlinks, reward commands, both chat filters and 10-second fade. `0.1.6-dev` bump with code; run available source/Lua 5.0.3 checks, document runtime validation debt. Do **not** fix the separately reported hand-in bug or release/promote.
