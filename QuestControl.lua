@@ -1051,6 +1051,7 @@ local function createRow()
     local quest = iconButton(frame, "Interface\\GossipFrame\\AvailableQuestIcon",
         QUEST_W - 22, ROW_MIN)
     quest:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, 0)
+    quest.icon:SetTexture(nil) -- the large hit target must not stretch quest artwork
     local qIcon = quest:CreateTexture(nil, "ARTWORK")
     qIcon:SetWidth(15); qIcon:SetHeight(15)
     qIcon:SetPoint("LEFT", quest, "LEFT", 3, 0)
