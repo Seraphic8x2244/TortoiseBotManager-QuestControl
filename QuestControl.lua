@@ -1,6 +1,5 @@
 -- QuestControl: message-handling foundation for Vanilla WoW 1.12.1 (Lua 5.0.3).
--- Quest rows, player hand-in tracking and reward commands are Chunk 2.
--- The finished window and checkbox widget are Chunk 3.
+-- Quest state and reward delivery are implemented; UI follows in Chunk 3.
 TortoiseBotQuestControl = TortoiseBotQuestControl or {}
 local QC = TortoiseBotQuestControl
 
@@ -234,6 +233,226 @@ local function installChatVisibilityFilter()
     QC._chatVisibilityInstalled = installed
 end
 
+
+-- Chunk 2: ephemeral player hand-in rows, with one cell per grouped TBM bot.
+-- Rows are created by submitting GetQuestReward, not QUEST_COMPLETE (which
+-- merely opens the reward page) or a bot's objectives_completed notification.
+local questRows = {}
+local nextRowKey = 0
+
+local function cleanQuestTitle(title)
+    if type(title) ~= "string" or title == "" then return nil end
+    -- A quest chat hyperlink displays [Title]; GetTitleText() returns Title.
+    local _, _, unwrapped = string.find(title, "^%[(.*)%]$")
+    return unwrapped or title
+end
+
+local function trackedBots()
+    local result, seen = {}, {}
+    local function add(name)
+        local bot = QC.ResolveBot(name)
+        if bot and bot.name and not seen[bot.name] then
+            seen[bot.name] = true
+            table.insert(result, bot)
+        end
+    end
+
+    -- The group is the set of bots being asked to complete the hand-in.
+    local raidSize = GetNumRaidMembers and GetNumRaidMembers() or 0
+    if raidSize > 0 then
+        for index = 1, raidSize do add(UnitName("raid" .. index)) end
+    else
+        local partySize = GetNumPartyMembers and GetNumPartyMembers() or 0
+        for index = 1, partySize do add(UnitName("party" .. index)) end
+    end
+    -- TBM also tracks members from its server-owned group snapshot. This
+    -- preserves claimed/grouped bots if the client group view is still updating.
+    local manager = TortoiseBots
+    if manager and manager.GetGroupedBotNames then
+        for _, name in ipairs(manager.GetGroupedBotNames() or {}) do add(name) end
+    end
+    table.sort(result, function(a, b) return a.name < b.name end)
+    return result
+end
+
+-- Public read-only-by-convention data for the Chunk 3 window.
+-- row = { key, title, questId?, questLink?, botNames, bots[name] = cell }
+-- cell = { botInfo, status, rewardOptions?, selected?, received?, outcome? }
+function QC.GetQuestRows()
+    return questRows
+end
+
+function QC.GetTrackedBots()
+    return trackedBots()
+end
+
+function QC.GetBotColumns()
+    local columns, seen = {}, {}
+    for _, row in ipairs(questRows) do
+        for _, name in ipairs(row.botNames) do
+            if not seen[name] then
+                seen[name] = true
+                table.insert(columns, row.bots[name].botInfo)
+            end
+        end
+    end
+    table.sort(columns, function(a, b) return a.name < b.name end)
+    return columns
+end
+
+local function stateChanged()
+    -- The presentation layer will own rendering; no UI is created in Chunk 2.
+    if QC.OnStateChanged then QC.OnStateChanged() end
+end
+
+function QC.RecordPlayerHandIn(title)
+    title = cleanQuestTitle(title)
+    if not title then return nil end
+
+    local bots = trackedBots()
+    if table.getn(bots) == 0 then return nil end
+    nextRowKey = nextRowKey + 1
+    local row = { key = nextRowKey, title = title, botNames = {}, bots = {} }
+    for _, bot in ipairs(bots) do
+        table.insert(row.botNames, bot.name)
+        row.bots[bot.name] = { botInfo = bot, status = "waiting" }
+    end
+    table.insert(questRows, row)
+    stateChanged()
+    return row.key
+end
+
+local function unresolvedCell(row, botName)
+    local cell = row.bots[botName]
+    if cell and cell.status ~= "resolved" then return cell end
+    return nil
+end
+
+local function findQuestCell(parsed)
+    local title = parsed.quest and cleanQuestTitle(parsed.quest.name)
+    if not title then return nil end
+
+    -- Prefer a row already bound to the bot's actual quest-link ID. In the
+    -- original 1.12 quest log the ID is not returned, so initially the row
+    -- only has the player-facing quest title; bind its ID on the first reply.
+    if parsed.questId then
+        for _, row in ipairs(questRows) do
+            local cell = unresolvedCell(row, parsed.bot)
+            if cell and row.questId == parsed.questId then return row, cell end
+        end
+    end
+    for _, row in ipairs(questRows) do
+        local cell = unresolvedCell(row, parsed.bot)
+        if cell and row.title == title and not row.questId then
+            row.questId = parsed.questId
+            row.questLink = parsed.quest.link
+            return row, cell
+        end
+    end
+    return nil
+end
+
+local function allResolved(row)
+    for _, name in ipairs(row.botNames) do
+        if row.bots[name].status ~= "resolved" then return false end
+    end
+    return true
+end
+
+local function finishCell(row, cell, outcome, item)
+    cell.status = "resolved"
+    cell.outcome = outcome
+    cell.received = item
+    if allResolved(row) then
+        for index, active in ipairs(questRows) do
+            if active == row then
+                table.remove(questRows, index)
+                break
+            end
+        end
+    end
+    stateChanged()
+end
+
+-- Clicking a Chunk 3 reward icon calls this API with the row key, bot name and
+-- index into that bot's actual linked options. Never rebuild the hyperlink.
+function QC.ChooseReward(rowKey, botName, optionIndex)
+    if type(optionIndex) ~= "number" or optionIndex < 1 or
+        optionIndex ~= math.floor(optionIndex) then return false end
+    for _, row in ipairs(questRows) do
+        if row.key == rowKey then
+            local cell = unresolvedCell(row, botName)
+            local option = cell and cell.rewardOptions and cell.rewardOptions[optionIndex]
+            if not option or not option.link or not option.id then return false end
+            if not SendChatMessage then return false end
+            cell.selected = option
+            cell.status = "awaiting_ack"
+            SendChatMessage("r " .. option.link, "WHISPER", nil, botName)
+            stateChanged()
+            return true
+        end
+    end
+    return false
+end
+
+-- Linkless reward acknowledgement is correlated by sending bot + item ID,
+-- selecting the oldest outstanding cell if the same item was sent for more
+-- than one quest. Other linkless quest chatter cannot identify a quest.
+function QC.OnQuestMessage(parsed)
+    if not parsed or not parsed.bot then return end
+    if parsed.kind == "reward_ack" then
+        if not parsed.item then return end
+        for _, row in ipairs(questRows) do
+            local cell = unresolvedCell(row, parsed.bot)
+            if cell and cell.status == "awaiting_ack" and cell.selected and
+                cell.selected.id == parsed.item.id then
+                finishCell(row, cell, "reward_ack", parsed.item)
+                return
+            end
+        end
+        return
+    end
+
+    if not parsed.quest then return end
+    local kind = parsed.kind
+    -- Objective completion, quest availability/acceptance and other unrelated
+    -- notices never create a row or count as a player/bot hand-in.
+    if kind ~= "reward_prompt" and kind ~= "turned_in" and
+        kind ~= "turned_in_reward" and kind ~= "unable_to_turn_in" and
+        kind ~= "incomplete" and kind ~= "already_completed" and
+        kind ~= "failed" then return end
+
+    local row, cell = findQuestCell(parsed)
+    if not row then return end
+    if kind == "reward_prompt" then
+        cell.rewardOptions = parsed.rewardOptions
+        cell.selected = nil
+        cell.status = "choices"
+        stateChanged()
+    else
+        finishCell(row, cell, kind, parsed.item)
+    end
+end
+
+-- Vanilla has no QUEST_TURNED_IN event. QUEST_FINISHED includes cancellations,
+-- whereas GetQuestReward is the actual final reward/hand-in submission.
+-- Chain the native API, capturing the visible reward quest before it closes.
+local function installHandInHook()
+    if QC._handInHookInstalled or type(GetQuestReward) ~= "function" then return end
+    local previous = GetQuestReward
+    GetQuestReward = function(choice)
+        local title
+        if QuestFrameRewardPanel and QuestFrameRewardPanel:IsVisible() and
+            type(GetTitleText) == "function" then
+            title = GetTitleText()
+        end
+        local result = previous(choice)
+        if title then QC.RecordPlayerHandIn(title) end
+        return result
+    end
+    QC._handInHookInstalled = true
+end
+
 local events = CreateFrame("Frame", "TortoiseBotQuestControlEvents")
 events:RegisterEvent("ADDON_LOADED")
 for channel in pairs(CHANNELS) do events:RegisterEvent(channel) end
@@ -247,6 +466,7 @@ events:SetScript("OnEvent", function()
                 TortoiseBotQuestControlDB.hideBotQuestMessages = true
             end
             installChatVisibilityFilter()
+            installHandInHook()
         end
     elseif CHANNELS[event] then
         QC.ReceiveChat(event, arg1, arg2)
