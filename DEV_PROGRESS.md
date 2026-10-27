@@ -19,22 +19,21 @@
 - **End-of-chunk handoff:** Commit coherent code/status to `dev` and update this file with branch, exact commit(s), `.toc` version, completed work, untested work, deferred work and exact next step. Keep `dev_rulebook.md` unchanged.
 - **Mandatory next-chat prompts:** At the end of Chunk 1, provide a **short copy-paste prompt for Chunk 2**. At the end of Chunk 2, provide the same for Chunk 3. Each fresh chat must read the rulebook and this status document and verify remote `dev` HEAD before changing code.
 
-### Next session — Chunk 1 only
+### Next session — Chunk 2 only
 
-Implement **Foundation and message handling**: addon loader/entry point, 1.12.1 quest-message capture, bot attribution, recognised patterns, preserved hyperlinks, party/raid/whisper filtering and the global `Hide Bot Quest Messages` setting. The setting controls visibility only, never parsing. Account for TortoiseBotsManager's existing chat filter without hiding unrelated messages. Defer quest-state lifecycle and reward-command logic to Chunk 2, and the finished UI/checkbox widget to Chunk 3. Commit on `dev`; update `DEV_PROGRESS.md`; finish with the **Chunk 2 fresh-chat prompt**. **Do not request runtime testing.**
-
+Implement **Quest state and reward logic** as specified in the fixed three-chunk table above. Consume `TortoiseBotQuestControl.OnQuestMessage(parsed)`; detect **player quest hand-ins**, maintain **quest rows × tracked-bot columns**, correlate per-bot reward choices/acknowledgements (including acknowledgements with no quest ID), send `SendChatMessage("r " .. itemLink, "WHISPER", nil, botName)` with the **original item link**, and remove rows when all tracked bots resolve. Treat objective completion as distinct from a quest hand-in. Defer the completed window, item widgets and checkbox UI to Chunk 3. Do not request runtime tests. Commit to `dev`, update this file and supply a short fresh-chat Chunk 3 prompt.
 ---
 
 
 > Single live development/status document for TortoiseBotManager-QuestControl. Structure adapted from `Seraphic8x2244/VanillaTemplate/DEV_PROGRESS.md`; canonical `dev_rulebook.md` copied unchanged from the same template.
 
 ## Current
-- Branch: `dev` (active development); `main` is the initial README-only baseline.
-- Version: Not assigned; no addon `.toc` or runtime files yet.
-- Development head at start of this status write: `74287939a60c194169662bb8d54e5aeb7a8c80b2` (copied rulebook). The commit adding this file is the newer `dev` head; verify `dev` when resuming.
-- Stable baseline: None; no addon released.
-- Goal: Build a Vanilla WoW 1.12.1 quest-by-bot reward selection UI, primarily to reduce TortoiseBots quest chat spam.
-- Current scope boundary: Design and documentation only. No addon runtime code, server modification, or optional controls beyond the requested chat-visibility checkbox.
+- Branch: **`dev`**. Latest original head verified before Chunk 1: `7e08331571323bb39d5e1a22eb010ce311a1f62d`.
+- Version: **`0.1.0-dev`** in `TortoiseBotManager-QuestControl.toc` (authoritative source, `Interface: 11200`).
+- Latest code commit: `803971f5458cb889246a0d16c8503893176ea57d`. Latest documentation commit before this handoff: `a7e0f1b978ef9b6022f19916ad951d802d16c5dc`. **Handoff HEAD is the commit containing this status update**; verify actual remote `dev` HEAD at start of Chunk 2.
+- Stable/runtime baseline: **None**. `main` remains README-only at `c1917adea82893919c987e492cce90e7b543ebcc`.
+- Goal: Vanilla 1.12.1 TBM-integrated quest-by-bot reward UI / selective bot quest chat suppression.
+- Current state: **Chunk 1 implemented; source static checks passed; no compiler or in-game tests**. Addon is intentionally incomplete until Chunks 2 and 3. No scope additions or branch promotion.
 
 ## Current Design / Development Contract
 
@@ -81,59 +80,62 @@ Implement **Foundation and message handling**: addon loader/entry point, 1.12.1 
 - Row resolution follows parsed bot messages; do not invent additional confirmations, retries, timeouts, or safeguards.
 
 ## Recent Relevant Commits
-- `c1917adea82893919c987e492cce90e7b543ebcc` — initialise `main` with project README.
-- `74287939a60c194169662bb8d54e5aeb7a8c80b2` — copy canonical `dev_rulebook.md` unchanged on `dev`.
-- This document's creation is the next `dev` commit; obtain exact SHA from remote history.
+- `c1917adea82893919c987e492cce90e7b543ebcc` — initial `main` README.
+- `74287939a60c194169662bb8d54e5aeb7a8c80b2` — canonical unchanged rulebook.
+- `231a3e02522e7ecfa97224d1b22b43d97c808962` — initial protocol/design.
+- `7e08331571323bb39d5e1a22eb010ce311a1f62d` — fixed three-chunk contract.
+- `1cf87ff9bee052f7a56fa933bb4e8727127f6550` — Chunk 1 `.toc`.
+- `da988457bd307abf9c87e326f9419e43d57c5415` — localization label.
+- `803971f5458cb889246a0d16c8503893176ea57d` — core message-handling foundation.
+- `a7e0f1b978ef9b6022f19916ad951d802d16c5dc` — README Chunk 1 status.
+- Current handoff status-only commit: this `DEV_PROGRESS.md` revision (check branch HEAD).
 
 ## Completed / User-Verified
-- Requirements and table orientation agreed in chat.
-- Server quest text templates, newline-separated item links, reward `r [itemlink]` handling, and relevant upstream source paths researched.
-- Development documentation setup: README and copied canonical rulebook; this progress/design plan.
+- The prior quest-by-bot table design, original-link commands, full English SQL template list and three-chunk boundaries are preserved.
+- **No gameplay code has been user-verified.** Chunk 1 implementation is described below; it is not a stable/tested runtime build.
 
 ## Implemented / Awaiting Runtime Test
-- None. Addon implementation has not started.
+- `TortoiseBotManager-QuestControl.toc`: `Interface: 11200`, `0.1.0-dev`, optional TBM dependency/load ordering, SavedVariables and locale/core loader.
+- `locales/enUS.lua`: `Hide Bot Quest Messages` label, to be displayed by the Chunk 3 checkbox.
+- `QuestControl.lua`: event-frame capture for party, raid, raid leader and whisper; bot attribution only through TBM's `GetRosterEntry` / `GetClaimedEntry` rather than indiscriminate player-text matching.
+- Exact English quest templates: reward-choice prompt (newline-separated item links), `reward_ack` without quest ID, handed-in (with/without item), inability, incomplete, available, accepted, already-have/completed, cannot-take variations, quest failed, objective-complete and generic quest responses. `Completed %quest_link` is **objectives complete**, not hand-in.
+- Original `|Hquest:...` / `|Hitem:...` hyperlinks are retained verbatim in structured event data, including ordered `rewardOptions`. `QC.ParseQuestMessage(message)` exposes parser data; `QC.ReceiveChat(channel, message, sender)` attaches bot/channel metadata and forwards once through `QC.OnQuestMessage(parsed)` when Chunk 2 installs it.
+- `TortoiseBotQuestControlDB.hideBotQuestMessages` defaults to **true**; `GetHideBotQuestMessages` / `SetHideBotQuestMessages` change display **only**. Parsing and callback dispatch are independent of visibility.
+- ChatFrame legacy handler is chained (including TBM's filter); native modern filter API is supported if present. Recognised bot quest messages alone are hidden; ordinary player chat and unrelated bot messages pass through.
+- **Not implemented**: hand-in tracking, rows/cells, resolution and sending reward commands (Chunk 2); TBM-style window, item icons/tooltips, checkbox widget and UI integration (Chunk 3).
 
 ## Static / Automated Checks
-- Source inspection only; no compiler/CI or addon static checks run.
+- **Passed:** 13 read-only source assertions on committed Lua, locale, TOC and unchanged rulebook: dev metadata/interface/version source, load order and DB, independent chat parsing, compatibility of legacy filter wrapping, original link preservation, quest objective versus hand-in, linkless acknowledgement, no introduced retries/timeouts/optional controls or obvious later-Lua constructs.
+- **Not run:** Lua 5.0.3 compiler. Canonical sources were inspected at `Seraphic8x2244/VanillaTemplate/tools/lua50`, but their files were not available in the executable container; direct GitHub DNS access was unavailable. Do not infer a compiler pass.
+- **Not run as expressly prohibited until Chunk 3 is complete:** runtime/in-game tests or integration validation.
 
 ## Current Issues
-- There are no captured in-game message samples from this addon yet.
-- English SQL templates are confirmed; changes in server localisation/configuration could change chat text.
-- The server auto-pick paths do not provide selectable reward links.
-- How to map bot replies lacking quest IDs to active quest rows must be implemented against observed message ordering, without inventing extra product behaviour.
+- Actual WoW 1.12.1 chat link wire format, potential multi-line message splitting, callback/filter order, and TBM roster readiness are **untested**. No QuestControl in-game samples yet.
+- Only exact English TortoiseBots templates are parsed. Non-rostered senders are deliberately left visible to avoid hiding human chat.
+- Server auto-reward routes do not provide a selectable list. A `reward_ack` does not identify the quest; Chunk 2 must correlate it with pending state without inventing timeouts/retries.
 
 ## Testing
-
 ### Last Runtime Test
-- Version/commit: None.
-- Passed: None.
-- Failed: None.
-- Not tested: All QuestControl functionality.
+- Version/commit: **None**. Passed: none; failed: none; all gameplay functions untested.
 
-### Next Runtime Test
-- With `Hide Bot Quest Messages` unchecked, hand in a quest and compare every raw bot message to the corresponding quest/bot UI cell.
-- Enable the checkbox, repeat, and verify that recognised messages are hidden while the same UI updates occur.
-- With a bot reward-choice prompt, check item textures, mouseover tooltips and `/w BotName r [itemlink]` routing.
-- Verify the quest row hides when all tracked bots are resolved.
+### Next Runtime Test — **after Chunk 3 only**
+- Compare each party/raid/whisper bot quest message to parsed bot/quest/reward cells with hiding unchecked; repeat with hiding checked, confirming the same state/UI and only the intended chat disappearance.
+- Verify original reward-link whisper command, per-bot tooltip/icon, ack correlation, row removal, and preservation of unrelated chat; validate combined TBM/WoW 1.12.1 behaviour.
+- Tests/defect fixes after completion of all three chunks belong to Chunk 3 stabilization, **not a fourth chunk**.
 
 ## Planned / Next Work
-1. Add the minimal 1.12.1 addon `.toc` and Lua entry point on `dev`; assign the first development version in `.toc`.
-2. Implement the player-turn-in row trigger and quest-by-bot table styled after TBM.
-3. Parse the verified bot quest messages and their quest/item hyperlinks from party/raid/whisper.
-4. Implement the single `Hide Bot Quest Messages` master checkbox so chat suppression can be switched off for debugging without disabling parsing.
-5. Render square item icons and item hyperlink tooltips; wire icon click to direct `r [itemlink]` whisper to the matching bot.
-6. Remove quest rows when all tracked bot entries are resolved; test in game.
+- **Chunk 2 only (next fresh chat):** player quest hand-in events; quest rows × tracked-bot columns; consume `QC.OnQuestMessage`; correlate no-ID replies, resolve each bot's quest state, send the exact selected hyperlink to that bot, remove rows after all tracked bots resolve. Commit and update this handoff.
+- **Chunk 3 only (later):** TBM-style UI, bot headings/classes, square icons/tooltips, one checkbox, integration and final static/compiler checks, then first end-to-end runtime testing.
 
 ## Deferred / Out of Scope
-- Server changes or structured custom quest transport.
-- Bot quest acceptance controls, automatic reward picking, other management features, speculative safeguards.
-- Unverified claims about in-game behaviour.
+- Defer all UI and checkbox widget work to Chunk 3; no interim runtime testing.
+- No server changes, automatic quest accepting/picking, additional controls, retries, arbitrary timeouts or new chunks.
+- No `main` promotion or claimed release/stable baseline.
 
 ## Release / Promotion Notes
-- Main-only or release-only content to preserve: `main` currently contains the project README only.
-- Known validation debt accepted for release: None; no release authorised.
-- External/runtime prerequisites: WoW 1.12.1, TortoiseBots server, TortoiseBotsManager for visual/integration reference. Source repo `Seraphic8x2244/VanillaTemplate`.
-- Apply canonical `dev_rulebook.md` rules, including a version bump for future addon-affecting code and runtime verification before release.
+- `main` stays README-only. No release authorised; all gameplay behaviour is untested.
+- Dependencies/target: native WoW 1.12.1, TortoiseBots server, optional TortoiseBotsManager API for bot attribution; TBM visual style is a Chunk 3 reference.
+- `dev_rulebook.md` stays unchanged; development patch versions must increase for subsequent addon code changes.
 
 ## Exact Next Step
-On `dev`, inspect `dev_rulebook.md` and this `DEV_PROGRESS.md`, verify the current remote head, then add the **minimal addon `.toc` and Lua entry point**. Begin with player quest-turn-in detection and the verified bot-message parser plus the master `Hide Bot Quest Messages` checkbox. Do not implement additional features.
+**Start a fresh chat for Chunk 2 of 3.** Read `dev_rulebook.md` and this `DEV_PROGRESS.md` first, verify latest `dev` HEAD against the code and this status-only handoff, and implement **player hand-in-driven quest state plus per-bot reward selection and acknowledgement correlation** through Chunk 1's structured callback. No finished UI, no runtime tests, no new chunks. Commit to `dev`, update `DEV_PROGRESS.md`, then supply the Chunk 3 prompt.
