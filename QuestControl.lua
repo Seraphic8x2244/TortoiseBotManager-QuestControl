@@ -238,6 +238,9 @@ end
 -- Acceptance, hand-in issues and reward choices are distinct row stages.
 local questRows, pendingEvents = {}, {}
 local nextRowKey = 0
+-- Resolved rows stay legible for seven seconds, then fade for three.
+local RESOLVED_HOLD_SECONDS, RESOLVED_FADE_SECONDS = 7, 3
+local RESOLVED_TOTAL_SECONDS = RESOLVED_HOLD_SECONDS + RESOLVED_FADE_SECONDS
 
 local function cleanQuestTitle(title)
     if type(title) ~= "string" or title == "" then return nil end
@@ -278,7 +281,15 @@ end
 
 local function saveState()
     local store = db()
-    store.questRows = questRows
+    -- Fully resolved rows are visual-only until their fade finishes.
+    -- Do not resurrect completed rows after /reload or a relog.
+    local pendingRows = {}
+    for _, row in ipairs(questRows) do
+        if not row.fadeStartedAt then
+            table.insert(pendingRows, row)
+        end
+    end
+    store.questRows = pendingRows
     store.pendingEvents = pendingEvents
     store.nextRowKey = nextRowKey
 end
@@ -396,9 +407,60 @@ end
 
 local function removeResolvedRows()
     for i = table.getn(questRows), 1, -1 do
-        if resolvedRow(questRows[i]) then
-            table.remove(questRows, i)
+        local row = questRows[i]
+        if resolvedRow(row) then
+            -- A silent, assumed-success hand-in used to clear immediately;
+            -- retain that behaviour rather than create a new visual row.
+            local silentHandIn = row.stage == "handin"
+            if silentHandIn then
+                for _, name in ipairs(row.botNames) do
+                    if row.bots[name].status ~= "assumed" then
+                        silentHandIn = false
+                        break
+                    end
+                end
+            end
+            if silentHandIn then
+                table.remove(questRows, i)
+            elseif not row.fadeStartedAt then
+                row.fadeStartedAt = GetTime()
+            end
+        else
+            -- If new evidence reopens the checkpoint, cancel its fade.
+            row.fadeStartedAt = nil
         end
+    end
+end
+
+function QC.RowFadeAlpha(row, now)
+    if not row.fadeStartedAt then return 1 end
+    local elapsed = (now or GetTime()) - row.fadeStartedAt
+    if elapsed <= RESOLVED_HOLD_SECONDS then return 1 end
+    return math.max(0, 1 - (elapsed - RESOLVED_HOLD_SECONDS) /
+        RESOLVED_FADE_SECONDS)
+end
+
+function QC.TickResolvedFades()
+    local now = GetTime()
+    local removed, fading = false, false
+    for i = table.getn(questRows), 1, -1 do
+        local row = questRows[i]
+        if row.fadeStartedAt then
+            if not resolvedRow(row) then
+                row.fadeStartedAt = nil
+                removed = true -- repaint the revived row at full opacity
+            elseif now - row.fadeStartedAt >= RESOLVED_TOTAL_SECONDS then
+                table.remove(questRows, i)
+                removed = true
+            else
+                fading = true
+            end
+        end
+    end
+    if removed then
+        stateChanged()
+    elseif fading and QC.RefreshRowFades then
+        QC.RefreshRowFades(now)
     end
 end
 
@@ -1049,6 +1111,7 @@ function QC.RefreshUI()
             row.interaction.targetName and
             (L.CONTEXT_TARGET .. row.interaction.targetName) or "")
         widget.dismiss.rowKey = row.key
+        widget.frame:SetAlpha(QC.RowFadeAlpha(row))
         for _, cell in ipairs(widget.cells) do cell.frame:Hide() end
         for j, bot in ipairs(columns) do
             renderBotCell(widget, row, bot.name, j, height)
@@ -1072,6 +1135,15 @@ function QC.RefreshUI()
     if horizontalMax > 0 then uiHorizontal:Show() else uiHorizontal:Hide() end
     if verticalMax > 0 then uiVertical:Show() else uiVertical:Hide() end
     uiCheckbox:SetChecked(QC.GetHideBotQuestMessages())
+end
+
+-- Alpha updates do not rebuild the table or mutate quest state each frame.
+function QC.RefreshRowFades(now)
+    if not uiWindow or not uiWindow:IsShown() then return end
+    for index, row in ipairs(questRows) do
+        local widget = rowWidgets[index]
+        if widget then widget.frame:SetAlpha(QC.RowFadeAlpha(row, now)) end
+    end
 end
 
 local function createScrollSlider(parent, orientation, width, height)
@@ -1213,6 +1285,7 @@ function QC.OnStateChanged()
 end
 
 local events = CreateFrame("Frame", "TortoiseBotQuestControlEvents")
+events:SetScript("OnUpdate", function() QC.TickResolvedFades() end)
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("QUEST_LOG_UPDATE")
 for channel in pairs(CHANNELS) do events:RegisterEvent(channel) end
