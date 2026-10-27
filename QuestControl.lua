@@ -233,15 +233,14 @@ local function installChatVisibilityFilter()
 end
 
 
--- Chunk 2: ephemeral player hand-in rows, with one cell per grouped TBM bot.
--- Rows are created by submitting GetQuestReward, not QUEST_COMPLETE (which
--- merely opens the reward page) or a bot's objectives_completed notification.
-local questRows = {}
+-- Chunk 3 stabilization: persistent, order-independent bot quest observations.
+-- A bot event is recorded before any attempt to find a player-created row.
+-- Acceptance, hand-in issues and reward choices are distinct row stages.
+local questRows, pendingEvents = {}, {}
 local nextRowKey = 0
 
 local function cleanQuestTitle(title)
     if type(title) ~= "string" or title == "" then return nil end
-    -- A quest chat hyperlink displays [Title]; GetTitleText() returns Title.
     local _, _, unwrapped = string.find(title, "^%[(.*)%]$")
     return unwrapped or title
 end
@@ -255,8 +254,6 @@ local function trackedBots()
             table.insert(result, bot)
         end
     end
-
-    -- The group is the set of bots being asked to complete the hand-in.
     local raidSize = GetNumRaidMembers and GetNumRaidMembers() or 0
     if raidSize > 0 then
         for index = 1, raidSize do add(UnitName("raid" .. index)) end
@@ -264,8 +261,6 @@ local function trackedBots()
         local partySize = GetNumPartyMembers and GetNumPartyMembers() or 0
         for index = 1, partySize do add(UnitName("party" .. index)) end
     end
-    -- TBM also tracks members from its server-owned group snapshot. This
-    -- preserves claimed/grouped bots if the client group view is still updating.
     local manager = TortoiseBots
     if manager and manager.GetGroupedBotNames then
         for _, name in ipairs(manager.GetGroupedBotNames() or {}) do add(name) end
@@ -274,9 +269,33 @@ local function trackedBots()
     return result
 end
 
--- Public read-only-by-convention data for the quest window.
--- row = { key, title, questId?, questLink?, botNames, bots[name] = cell }
--- cell = { botInfo, status, rewardOptions?, selected?, received?, outcome? }
+local function db()
+    if type(TortoiseBotQuestControlState) ~= "table" then
+        TortoiseBotQuestControlState = {}
+    end
+    return TortoiseBotQuestControlState
+end
+
+local function saveState()
+    local store = db()
+    store.questRows = questRows
+    store.pendingEvents = pendingEvents
+    store.nextRowKey = nextRowKey
+end
+
+function QC.LoadQuestState()
+    local store = db()
+    questRows = type(store.questRows) == "table" and store.questRows or {}
+    pendingEvents = type(store.pendingEvents) == "table" and store.pendingEvents or {}
+    nextRowKey = type(store.nextRowKey) == "number" and store.nextRowKey or 0
+    for _, row in ipairs(questRows) do
+        if type(row.key) == "number" and row.key > nextRowKey then
+            nextRowKey = row.key
+        end
+    end
+    saveState()
+end
+
 function QC.GetQuestRows()
     return questRows
 end
@@ -289,9 +308,10 @@ function QC.GetBotColumns()
     local columns, seen = {}, {}
     for _, row in ipairs(questRows) do
         for _, name in ipairs(row.botNames) do
-            if not seen[name] then
+            local cell = row.bots[name]
+            if cell and not seen[name] then
                 seen[name] = true
-                table.insert(columns, row.bots[name].botInfo)
+                table.insert(columns, cell.botInfo or { name = name })
             end
         end
     end
@@ -300,91 +320,325 @@ function QC.GetBotColumns()
 end
 
 local function stateChanged()
-    -- State changes notify the presentation layer; they never change parsing.
+    saveState()
     if QC.OnStateChanged then QC.OnStateChanged() end
 end
 
-function QC.RecordPlayerHandIn(title)
-    title = cleanQuestTitle(title)
-    if not title then return nil end
+local function findPlayerQuestLink(title)
+    -- Stock 1.12 does not expose GetQuestLink. Only use a client extension
+    -- with an explicitly index-based link API; otherwise use bot chat links.
+    if type(GetQuestLinkForLogIndex) ~= "function" or
+        not GetQuestLogTitle or not GetNumQuestLogEntries then return nil end
+    local indexFound
+    for index = 1, GetNumQuestLogEntries() do
+        local entryTitle, level, tag, isHeader = GetQuestLogTitle(index)
+        if not isHeader and cleanQuestTitle(entryTitle) == title then
+            if indexFound then return nil end -- duplicate titles are ambiguous
+            indexFound = index
+        end
+    end
+    if not indexFound then return nil end
+    local ok, link = pcall(GetQuestLinkForLogIndex, indexFound)
+    if ok and type(link) == "string" then
+        local _, _, linkedTitle =
+            string.find(link, "|Hquest:%d+[^|]*|h(%b[])|h")
+        if cleanQuestTitle(linkedTitle) == title then return link end
+    end
+    return nil
+end
 
+local function captureInteraction()
+    -- A unit target is only a hint, not proof it supplied the quest.
+    -- Vanilla exposes no reliable targeted game-object identity here.
+    if UnitExists and UnitName and UnitExists("target") then
+        return { targetName = UnitName("target"), source = "selected unit" }
+    end
+    return nil
+end
+
+local function newRow(stage, title, questId, questLink, interaction)
+    -- Columns are exclusively the online/grouped bots TBM reports.
     local bots = trackedBots()
     if table.getn(bots) == 0 then return nil end
+    table.sort(bots, function(a, b) return a.name < b.name end)
     nextRowKey = nextRowKey + 1
-    local row = { key = nextRowKey, title = title, botNames = {}, bots = {} }
+    local row = {
+        key = nextRowKey, stage = stage, title = title,
+        questId = questId, questLink = questLink, interaction = interaction,
+        botNames = {}, bots = {},
+    }
     for _, bot in ipairs(bots) do
         table.insert(row.botNames, bot.name)
-        row.bots[bot.name] = { botInfo = bot, status = "waiting" }
+        row.bots[bot.name] = {
+            botInfo = { name = bot.name, classId = bot.classId,
+                className = bot.className, guid = bot.guid },
+            status = stage == "accept" and "unconfirmed" or "assumed",
+        }
     end
     table.insert(questRows, row)
-    stateChanged()
-    return row.key
+    return row
 end
 
-local function unresolvedCell(row, botName)
-    local cell = row.bots[botName]
-    if cell and cell.status ~= "resolved" then return cell end
-    return nil
-end
-
-local function findQuestCell(parsed)
-    local title = parsed.quest and cleanQuestTitle(parsed.quest.name)
-    if not title then return nil end
-
-    -- Prefer a row already bound to the bot's actual quest-link ID. In the
-    -- original 1.12 quest log the ID is not returned, so initially the row
-    -- only has the player-facing quest title; bind its ID on the first reply.
-    if parsed.questId then
-        for _, row in ipairs(questRows) do
-            local cell = unresolvedCell(row, parsed.bot)
-            if cell and row.questId == parsed.questId then return row, cell end
-        end
-    end
-    for _, row in ipairs(questRows) do
-        local cell = unresolvedCell(row, parsed.bot)
-        if cell and row.title == title and not row.questId then
-            row.questId = parsed.questId
-            row.questLink = parsed.quest.link
-            return row, cell
-        end
-    end
-    return nil
-end
-
-local function allResolved(row)
+local function resolvedRow(row)
     for _, name in ipairs(row.botNames) do
-        if row.bots[name].status ~= "resolved" then return false end
+        local cell = row.bots[name]
+        if not cell then return false end
+        if row.stage == "accept" then
+            if cell.status ~= "accepted" and cell.status ~= "already_have" then
+                return false
+            end
+        elseif cell.status ~= "assumed" and cell.status ~= "resolved" then
+            return false
+        end
     end
     return true
 end
 
-local function finishCell(row, cell, outcome, item)
-    cell.status = "resolved"
-    cell.outcome = outcome
-    cell.received = item
-    if allResolved(row) then
-        for index, active in ipairs(questRows) do
-            if active == row then
-                table.remove(questRows, index)
-                break
+local function removeResolvedRows()
+    for i = table.getn(questRows), 1, -1 do
+        if resolvedRow(questRows[i]) then
+            table.remove(questRows, i)
+        end
+    end
+end
+
+-- Avoid assigning an ID to a title-only row when distinct IDs have appeared.
+local function ambiguousTitle(title)
+    local found
+    for _, observed in ipairs(pendingEvents) do
+        if observed.title == title and observed.questId then
+            if found and found ~= observed.questId then return true end
+            found = observed.questId
+        end
+    end
+    return false
+end
+
+local function findRow(stage, title, questId, botName)
+    local fallback, matches = nil, 0
+    for _, row in ipairs(questRows) do
+        if row.stage == stage and row.title == title and
+            (not botName or row.bots[botName]) then
+            if questId and row.questId == questId then return row end
+            if not questId or not row.questId then
+                fallback = row
+                matches = matches + 1
             end
         end
     end
-    stateChanged()
+    if matches == 1 and (not questId or not ambiguousTitle(title)) then
+        return fallback
+    end
+    return nil
 end
 
--- Clicking a reward icon calls this API with the row key, bot name and
--- index into that bot's actual linked options. Never rebuild the hyperlink.
+local function bindQuest(row, observed)
+    if observed.questId and not row.questId then
+        row.questId = observed.questId
+    end
+    if observed.questLink and not row.questLink then
+        row.questLink = observed.questLink
+    end
+end
+
+local function applyObserved(observed)
+    local kind = observed.kind
+    local stage
+    if kind == "accepted" or kind == "available" or
+        kind == "already_have" or kind == "already_completed" or
+        kind == "cannot_take" or
+        kind == "cannot_take_log_full" or kind == "cannot_take_bag_full" or
+        kind == "failed" then
+        stage = "accept"
+    elseif kind == "reward_prompt" or kind == "turned_in" or
+        kind == "turned_in_reward" then
+        stage = "reward"
+    elseif kind == "unable_to_turn_in" or kind == "incomplete" then
+        stage = "handin"
+    else
+        return true -- available/objectives are not hand-ins or acceptances
+    end
+
+    local row = findRow(stage, observed.title, observed.questId, observed.bot)
+    if not row and (kind == "reward_prompt" or stage == "handin") then
+        row = newRow(stage, observed.title, observed.questId,
+            observed.questLink)
+    end
+    if not row and (kind == "turned_in" or kind == "turned_in_reward") then
+        row = findRow("handin", observed.title, observed.questId, observed.bot)
+    end
+    if not row then return false end
+    local cell = row.bots[observed.bot]
+    if not cell then return false end
+    bindQuest(row, observed)
+
+    if stage == "accept" then
+        -- A later failure message must not undo a confirmed pickup.
+        if kind ~= "available" and
+            ((cell.status ~= "accepted" and cell.status ~= "already_have") or
+            kind == "accepted") then
+            cell.status = kind
+        end
+    elseif kind == "reward_prompt" then
+        if cell.status ~= "resolved" then
+            cell.rewardOptions = observed.rewardOptions
+            cell.selected = nil
+            cell.selectedIndex = nil
+            cell.status = "choices"
+        end
+    elseif kind == "turned_in" or kind == "turned_in_reward" then
+        cell.status = "resolved"
+        cell.outcome = kind
+        cell.received = observed.item
+    else
+        cell.status = kind
+        cell.outcome = kind
+    end
+    return true
+end
+
+local function replayPending()
+    -- One event may establish a reward row for an earlier unmatched event.
+    -- Repeat while an event can be consumed, without depending on its order.
+    local consumed
+    repeat
+        consumed = false
+        local index = 1
+        while index <= table.getn(pendingEvents) do
+            if applyObserved(pendingEvents[index]) then
+                table.remove(pendingEvents, index)
+                consumed = true
+            else
+                index = index + 1
+            end
+        end
+    until not consumed
+    removeResolvedRows()
+end
+
+local function playerRow(stage, title, interaction)
+    title = cleanQuestTitle(title)
+    if not title then return nil end
+    local knownLink = findPlayerQuestLink(title)
+    local questId
+    if knownLink then
+        local _, _, idText = string.find(knownLink, "|Hquest:(%d+)")
+        if idText then questId = tonumber(idText) end
+    end
+    local row = findRow(stage, title, questId)
+    if not row then
+        row = newRow(stage, title, questId, knownLink,
+            interaction or captureInteraction())
+    end
+    if not row then return nil end
+    if not row.questLink then row.questLink = knownLink end
+    if not row.interaction then row.interaction = interaction or captureInteraction() end
+    replayPending()
+    stateChanged()
+    return row.key
+end
+
+function QC.RecordPlayerAcceptance(title, interaction)
+    return playerRow("accept", title, interaction)
+end
+
+function QC.RecordPlayerHandIn(title, interaction)
+    title = cleanQuestTitle(title)
+    if not title then return nil end
+    -- An existing reward prompt owns the actionable state, not a second row.
+    local existing = findRow("reward", title)
+    if existing then
+        if not existing.interaction then
+            existing.interaction = interaction or captureInteraction()
+        end
+        replayPending()
+        stateChanged()
+        return existing.key
+    end
+    -- Hand-ins are assumed successful; a positive bot reply is optional.
+    -- Only explicit problems/reward prompts keep actionable hand-in rows.
+    return playerRow("handin", title, interaction)
+end
+
+function QC.RemoveQuestRow(rowKey)
+    for index, row in ipairs(questRows) do
+        if row.key == rowKey then
+            table.remove(questRows, index)
+            -- Deliberate dismissal also drops historical unmatched observations
+            -- for this quest, so replay cannot resurrect the dismissed row.
+            for pendingIndex = table.getn(pendingEvents), 1, -1 do
+                local pending = pendingEvents[pendingIndex]
+                if pending.title == row.title and
+                    (not row.questId or pending.questId == row.questId) then
+                    table.remove(pendingEvents, pendingIndex)
+                end
+            end
+            stateChanged()
+            return true
+        end
+    end
+    return false
+end
+
+function QC.RecoveryTalk(rowKey, botName)
+    for _, row in ipairs(questRows) do
+        if row.key == rowKey and row.bots[botName] and
+            row.bots[botName].status ~= "accepted" and
+            row.bots[botName].status ~= "already_have" and SendChatMessage then
+            SendChatMessage("talk", "WHISPER", nil, botName)
+            return true
+        end
+    end
+    return false
+end
+
+function QC.RecoveryAccept(rowKey, botName)
+    for _, row in ipairs(questRows) do
+        if row.key == rowKey and row.stage == "accept" and
+            row.bots[botName] and row.bots[botName].status ~= "accepted" and
+            row.bots[botName].status ~= "already_have" and SendChatMessage then
+            local link = row.questLink or findPlayerQuestLink(row.title)
+            if not link then return false end
+            row.questLink = link
+            SendChatMessage("accept " .. link, "WHISPER", nil, botName)
+            stateChanged()
+            return true
+        end
+    end
+    return false
+end
+
+function QC.RefreshQuestLinks()
+    local changed = false
+    for _, row in ipairs(questRows) do
+        if row.stage == "accept" and not row.questLink then
+            local link = findPlayerQuestLink(row.title)
+            if link then
+                row.questLink = link
+                local _, _, id = string.find(link, "|Hquest:(%d+)")
+                if id and not row.questId then row.questId = tonumber(id) end
+                changed = true
+            end
+        end
+    end
+    if changed then stateChanged() end
+end
+
+-- The exact original linked item is sent; a click never implies success.
 function QC.ChooseReward(rowKey, botName, optionIndex)
     if type(optionIndex) ~= "number" or optionIndex < 1 or
         optionIndex ~= math.floor(optionIndex) then return false end
     for _, row in ipairs(questRows) do
-        if row.key == rowKey then
-            local cell = unresolvedCell(row, botName)
+        if row.key == rowKey and row.stage == "reward" then
+            local cell = row.bots[botName]
             local option = cell and cell.rewardOptions and cell.rewardOptions[optionIndex]
             if not option or not option.link or not option.id then return false end
+            if cell.status ~= "choices" and cell.status ~= "awaiting_ack" then
+                return false
+            end
             if not SendChatMessage then return false end
             cell.selected = option
+            cell.selectedIndex = optionIndex
             cell.status = "awaiting_ack"
             SendChatMessage("r " .. option.link, "WHISPER", nil, botName)
             stateChanged()
@@ -394,62 +648,72 @@ function QC.ChooseReward(rowKey, botName, optionIndex)
     return false
 end
 
--- Linkless reward acknowledgement is correlated by sending bot + item ID,
--- selecting the oldest outstanding cell if the same item was sent for more
--- than one quest. Other linkless quest chatter cannot identify a quest.
 function QC.OnQuestMessage(parsed)
     if not parsed or not parsed.bot then return end
     if parsed.kind == "reward_ack" then
         if not parsed.item then return end
         for _, row in ipairs(questRows) do
-            local cell = unresolvedCell(row, parsed.bot)
-            if cell and cell.status == "awaiting_ack" and cell.selected and
-                cell.selected.id == parsed.item.id then
-                finishCell(row, cell, "reward_ack", parsed.item)
-                return
+            if row.stage == "reward" then
+                local cell = row.bots[parsed.bot]
+                if cell and cell.status == "awaiting_ack" and cell.selected
+                    and cell.selected.id == parsed.item.id then
+                    cell.status = "resolved"
+                    cell.outcome = "reward_ack"
+                    cell.received = parsed.item
+                    removeResolvedRows()
+                    stateChanged()
+                    return
+                end
             end
         end
         return
     end
-
     if not parsed.quest then return end
-    local kind = parsed.kind
-    -- Objective completion, quest availability/acceptance and other unrelated
-    -- notices never create a row or count as a player/bot hand-in.
-    if kind ~= "reward_prompt" and kind ~= "turned_in" and
-        kind ~= "turned_in_reward" and kind ~= "unable_to_turn_in" and
-        kind ~= "incomplete" and kind ~= "already_completed" and
-        kind ~= "failed" then return end
-
-    local row, cell = findQuestCell(parsed)
-    if not row then return end
-    if kind == "reward_prompt" then
-        cell.rewardOptions = parsed.rewardOptions
-        cell.selected = nil
-        cell.status = "choices"
-        stateChanged()
-    else
-        finishCell(row, cell, kind, parsed.item)
-    end
+    local observed = {
+        kind = parsed.kind, bot = parsed.bot, botInfo = parsed.botInfo,
+        title = cleanQuestTitle(parsed.quest.name),
+        questId = parsed.questId, questLink = parsed.quest.link,
+        item = parsed.item, rewardOptions = parsed.rewardOptions,
+    }
+    if not observed.title then return end
+    table.insert(pendingEvents, observed)
+    replayPending()
+    stateChanged()
 end
 
--- Vanilla has no QUEST_TURNED_IN event. QUEST_FINISHED includes cancellations,
--- whereas GetQuestReward is the actual final reward/hand-in submission.
--- Chain the native API, capturing the visible reward quest before it closes.
-local function installHandInHook()
-    if QC._handInHookInstalled or type(GetQuestReward) ~= "function" then return end
-    local previous = GetQuestReward
-    GetQuestReward = function(choice)
-        local title
-        if QuestFrameRewardPanel and QuestFrameRewardPanel:IsVisible() and
-            type(GetTitleText) == "function" then
-            title = GetTitleText()
+-- AcceptQuest and GetQuestReward are native 1.12 quest-dialogue functions.
+-- Capture the visible quest/title before chaining the original function.
+local function installQuestHooks()
+    if QC._questHooksInstalled then return end
+    if type(AcceptQuest) == "function" then
+        local previousAccept = AcceptQuest
+        AcceptQuest = function()
+            local title
+            if QuestFrameDetailPanel and QuestFrameDetailPanel:IsVisible() and
+                type(GetTitleText) == "function" then
+                title = GetTitleText()
+            end
+            local interaction = captureInteraction()
+            local result = previousAccept()
+            if title then QC.RecordPlayerAcceptance(title, interaction) end
+            return result
         end
-        local result = previous(choice)
-        if title then QC.RecordPlayerHandIn(title) end
-        return result
     end
-    QC._handInHookInstalled = true
+    if type(GetQuestReward) == "function" then
+        local previousReward = GetQuestReward
+        GetQuestReward = function(choice)
+            local title
+            if QuestFrameRewardPanel and QuestFrameRewardPanel:IsVisible() and
+                type(GetTitleText) == "function" then
+                title = GetTitleText()
+            end
+            local interaction = captureInteraction()
+            local result = previousReward(choice)
+            if title then QC.RecordPlayerHandIn(title, interaction) end
+            return result
+        end
+    end
+    QC._questHooksInstalled = true
 end
 
 
@@ -573,12 +837,32 @@ local function createRewardButton(parent)
     return button
 end
 
+local function createActionButton(panel, label, action)
+    local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    button:SetWidth(60); button:SetHeight(21)
+    button:SetText(label)
+    button:SetScript("OnClick", function()
+        if this.action == "talk" then
+            QC.RecoveryTalk(this.rowKey, this.botName)
+        else
+            QC.RecoveryAccept(this.rowKey, this.botName)
+        end
+    end)
+    button.action = action
+    return button
+end
+
 local function createBotCell(row)
     local panel = CreateFrame("Frame", nil, row.frame)
     panelBackdrop(panel, 0.38)
     local status = font(panel, "GameFontHighlightSmall", BOT_W - 14)
     status:SetPoint("TOPLEFT", panel, "TOPLEFT", 7, -9)
-    return { frame = panel, status = status, icons = {} }
+    local talk = createActionButton(panel, L.ACTION_TALK, "talk")
+    talk:SetPoint("TOPLEFT", panel, "TOPLEFT", 5, -33)
+    local accept = createActionButton(panel, L.ACTION_ACCEPT, "accept")
+    accept:SetPoint("LEFT", talk, "RIGHT", 4, 0)
+    return { frame = panel, status = status, icons = {},
+        talk = talk, accept = accept }
 end
 
 local function renderBotCell(widget, row, botName, colIndex, height)
@@ -597,15 +881,61 @@ local function renderBotCell(widget, row, botName, colIndex, height)
     local options = data and data.rewardOptions
     local selectable = data and (data.status == "choices" or
         data.status == "awaiting_ack") and options and table.getn(options) > 0
+    cell.talk:Hide()
+    cell.accept:Hide()
     if not data then
         cell.status:SetText(L.STATUS_NOT_TRACKED)
+    elseif row.stage == "accept" then
+        if data.status == "accepted" then
+            cell.status:SetText(L.STATUS_ACCEPTED)
+        elseif data.status == "already_have" then
+            cell.status:SetText(L.STATUS_ALREADY_HAVE)
+        elseif data.status == "already_completed" then
+            cell.status:SetText(L.STATUS_ALREADY_COMPLETE)
+        elseif data.status == "cannot_take" or
+            data.status == "cannot_take_log_full" or
+            data.status == "cannot_take_bag_full" or
+            data.status == "failed" then
+            cell.status:SetText(L.STATUS_CANNOT_ACCEPT)
+        else
+            cell.status:SetText(L.STATUS_UNCONFIRMED)
+        end
+        if data.status ~= "accepted" and data.status ~= "already_have" then
+            cell.talk.rowKey = row.key
+            cell.talk.botName = botName
+            cell.talk:Show()
+            cell.accept.rowKey = row.key
+            cell.accept.botName = botName
+            if row.questLink then
+                cell.accept:Enable()
+                cell.accept:SetAlpha(1)
+            else
+                cell.accept:Disable()
+                cell.accept:SetAlpha(0.45)
+            end
+            cell.accept:Show()
+        end
+    elseif row.stage == "handin" then
+        if data.status == "unable_to_turn_in" then
+            cell.status:SetText(L.STATUS_HANDIN_FAILED)
+        elseif data.status == "incomplete" then
+            cell.status:SetText(L.STATUS_INCOMPLETE)
+        else
+            cell.status:SetText(L.STATUS_HANDIN_ASSUMED)
+        end
+        if data.status == "unable_to_turn_in" or data.status == "incomplete" then
+            cell.talk.rowKey = row.key
+            cell.talk.botName = botName
+            cell.talk:Show()
+        end
     elseif selectable and data.status == "awaiting_ack" then
         cell.status:SetText(L.STATUS_AWAITING)
     elseif selectable then
         cell.status:SetText(L.STATUS_CHOOSE)
+    elseif data.status == "resolved" then
+        cell.status:SetText(L.STATUS_RESOLVED)
     else
-        cell.status:SetText(data and data.status == "resolved" and L.STATUS_RESOLVED
-            or L.STATUS_WAITING)
+        cell.status:SetText(L.STATUS_HANDIN_ASSUMED)
     end
     for _, button in ipairs(cell.icons) do button:Hide() end
     if selectable then
@@ -624,7 +954,7 @@ local function renderBotCell(widget, row, botName, colIndex, height)
             button.optionIndex = i
             button.option = option
             button.icon:SetTexture(itemTexture(option))
-            if data.selected and data.selected == option then
+            if data.selectedIndex == i then
                 button:SetBackdropBorderColor(1, 0.84, 0.35, 1)
             else
                 button:SetBackdropBorderColor(0.48, 0.36, 0.15, 0.85)
@@ -637,9 +967,23 @@ end
 local function createRow()
     local frame = CreateFrame("Frame", nil, uiContent)
     panelBackdrop(frame, 0.60)
-    local title = font(frame, "GameFontNormalSmall", QUEST_W - 18)
+    local title = font(frame, "GameFontNormalSmall", QUEST_W - 43)
     title:SetPoint("TOPLEFT", frame, "TOPLEFT", 9, -9)
-    local widget = { frame = frame, title = title, cells = {} }
+    local stage = font(frame, "GameFontHighlightSmall", QUEST_W - 18)
+    stage:SetPoint("TOPLEFT", frame, "TOPLEFT", 9, -44)
+    local context = font(frame, "GameFontHighlightSmall", QUEST_W - 18)
+    context:SetPoint("TOPLEFT", frame, "TOPLEFT", 9, -62)
+    local dismiss = CreateFrame("Button", nil, frame)
+    dismiss:SetWidth(18); dismiss:SetHeight(18)
+    dismiss:SetPoint("TOPRIGHT", frame, "TOPLEFT", QUEST_W - 8, -5)
+    local cross = font(dismiss, "GameFontNormalSmall")
+    cross:SetPoint("CENTER", dismiss, "CENTER", 0, 0)
+    cross:SetText("X")
+    dismiss:SetScript("OnClick", function()
+        QC.RemoveQuestRow(this.rowKey)
+    end)
+    local widget = { frame = frame, title = title, stage = stage,
+        context = context, dismiss = dismiss, cells = {} }
     table.insert(rowWidgets, widget)
     return widget
 end
@@ -675,7 +1019,7 @@ local function rowHeight(row)
             lines = math.max(lines, math.ceil(table.getn(cell.rewardOptions) / 4))
         end
     end
-    return math.max(55, 31 + lines * ICON_STEP)
+    return math.max(88, 38 + lines * ICON_STEP)
 end
 
 function QC.RefreshUI()
@@ -698,7 +1042,13 @@ function QC.RefreshUI()
         widget.frame:SetPoint("TOPLEFT", uiContent, "TOPLEFT", 0, -y)
         widget.frame:SetWidth(contentWidth); widget.frame:SetHeight(height)
         widget.title:SetText(row.title)
-        widget.title:SetHeight(height - 16)
+        widget.title:SetHeight(33)
+        widget.stage:SetText(row.stage == "accept" and L.STAGE_ACCEPT
+            or row.stage == "reward" and L.STAGE_REWARD or L.STAGE_HANDIN)
+        widget.context:SetText(row.interaction and
+            row.interaction.targetName and
+            (L.CONTEXT_TARGET .. row.interaction.targetName) or "")
+        widget.dismiss.rowKey = row.key
         for _, cell in ipairs(widget.cells) do cell.frame:Hide() end
         for j, bot in ipairs(columns) do
             renderBotCell(widget, row, bot.name, j, height)
@@ -742,6 +1092,10 @@ end
 
 function QC.InitUI()
     if uiWindow then return end
+    -- Restored rows must not trigger an unrelated auto-open on the next event.
+    for _, row in ipairs(QC.GetQuestRows()) do
+        if row.key > newestDisplayedKey then newestDisplayedKey = row.key end
+    end
     local window = CreateFrame("Frame", "TortoiseBotQuestControlFrame", UIParent)
     uiWindow = window
     window:SetWidth(UI_W); window:SetHeight(UI_H)
@@ -860,6 +1214,7 @@ end
 
 local events = CreateFrame("Frame", "TortoiseBotQuestControlEvents")
 events:RegisterEvent("ADDON_LOADED")
+events:RegisterEvent("QUEST_LOG_UPDATE")
 for channel in pairs(CHANNELS) do events:RegisterEvent(channel) end
 events:SetScript("OnEvent", function()
     if event == "ADDON_LOADED" then
@@ -870,10 +1225,13 @@ events:SetScript("OnEvent", function()
             if TortoiseBotQuestControlDB.hideBotQuestMessages == nil then
                 TortoiseBotQuestControlDB.hideBotQuestMessages = true
             end
+            QC.LoadQuestState()
             installChatVisibilityFilter()
-            installHandInHook()
+            installQuestHooks()
             QC.InitUI()
         end
+    elseif event == "QUEST_LOG_UPDATE" then
+        QC.RefreshQuestLinks()
     elseif CHANNELS[event] then
         QC.ReceiveChat(event, arg1, arg2)
     end
