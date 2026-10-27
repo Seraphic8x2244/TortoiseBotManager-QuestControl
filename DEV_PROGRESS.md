@@ -19,9 +19,11 @@
 - **End-of-chunk handoff:** Commit coherent code/status to `dev` and update this file with branch, exact commit(s), `.toc` version, completed work, untested work, deferred work and exact next step. Keep `dev_rulebook.md` unchanged.
 - **Mandatory next-chat prompts:** At the end of Chunk 1, provide a **short copy-paste prompt for Chunk 2**. At the end of Chunk 2, provide the same for Chunk 3. Each fresh chat must read the rulebook and this status document and verify remote `dev` HEAD before changing code.
 
-### Chunk 3 stabilization implemented — pending in-game verification
+### Chunk 3 stabilization — targeted row fade update pending runtime verification
 
-The first `0.1.2-dev` playtest passed basic UI behaviour but exposed order-dependent bot messages, missing pickup confirmation and lost pending state. Version `0.1.3-dev` now implements the approved **Chunk 3 stabilization fixes**, without changing the existing parser or original reward command. This is **source-implemented, not Lua-compiler-verified or user-runtime-verified**. No fourth chunk, server changes, rulebook changes or `main` promotion.
+Following the `0.1.3-dev` screenshot feedback, `0.1.4-dev` changes **only resolved-row retention/presentation**: a resolved row stays fully visible for seven seconds, fades out for three seconds, and is then deleted. An unresolved or re-opened row remains opaque. Fully assumed-success silent hand-ins continue clearing immediately (no new visual noise). Fade-only resolved records are **not persisted**, so a reload does not resurrect completed rows. The unrelated `The Harvest Golem Mystery` "Hand-in / Not complete" row issue remains **unfixed** and separately tracked.
+
+No quest classification, bot response parsing, reward commands, chat hiding, acceptance/hand-in hooks, quest chain data, or server behaviour is modified by this revision. No fourth chunk, rulebook change, release, or `main` promotion. Source-implemented; not yet Lua 5.0.3-compiled or user-runtime-verified.
 
 ---
 
@@ -29,11 +31,11 @@ The first `0.1.2-dev` playtest passed basic UI behaviour but exposed order-depen
 > Single live development/status document for TortoiseBotManager-QuestControl. Structure adapted from `Seraphic8x2244/VanillaTemplate/DEV_PROGRESS.md`; canonical `dev_rulebook.md` copied unchanged from the same template.
 
 ## Current
-- Branch: **`dev`**. Starting HEAD verified before implementation: **`21b24c1df7a1de63d0907d77e2928e7b0256d84a`**. **Implemented `0.1.3-dev` code commit: `3622e360551e0ac63a9e2ec291295f8d0f567942`**. This status update follows as a documentation-only `dev` commit; verify actual HEAD on resume. `main` unchanged.
-- Version: **`0.1.3-dev`** from the addon `.toc`, `Interface: 11200`; previous tested build **`0.1.2-dev`** (installed SHA unverified). `main` remains README-only. **No stable build.**
-- Current goal: repair Chunk 3 integration so each tracked bot's acceptance is visibly confirmed **before the player leaves a quest giver**, without imposing explicit hand-in messages or breaking original reward choices.
-- **All three chunks implemented; Chunk 3 stabilization revised in `0.1.3-dev`.** User's 2026-10-27 runtime test applies **only** to `0.1.2-dev`: UI basics passed; event sequence, reward visibility and persistence failed. Historical static checks applied to prior code, not the new revision. Lua 5.0.3 compiler and runtime retest remain outstanding.
-- Runtime test provenance: screenshots show `0.1.2-dev` on Vanilla WoW 1.12.1/TortoiseBots/TBM; **exact installed client commit SHA is unverified**. The `0.1.3-dev` implementation has not yet been installed or in-game tested.
+- Branch: **`dev`**. Previous base HEAD: **`e20cf011870d44bed2b78a9442a9de75487c505d`**. **`0.1.4-dev` fade-only implementation commit: `b5d245f4c859104be1b41033322973d551b1bc04`**. This documentation-only handoff commit follows it; verify remote `dev` HEAD before future changes. `main` unchanged.
+- Version: **`0.1.4-dev`** in addon `.toc`, `Interface: 11200`. Latest **partially user-tested** version: `0.1.3-dev` (screenshot shows runtime behaviour, installed commit unverified); initial UI-tested version `0.1.2-dev`. `main` README-only; **no stable release**.
+- Current scoped goal: finish **resolved-row 10-second visibility/fade** within Chunk 3; **defer** additional fixes to quest stages and the separately reported incomplete-hand-in row until explicitly requested.
+- **All three chunks implemented; Chunk 3 feedback-driven display update in `0.1.4-dev`.** Runtime evidence on `0.1.2-dev` (UI pass, correlation/state issues) and `0.1.3-dev` (some improved quest tracking, accepted message in chat, erroneous incomplete hand-in row) applies only to those specific versions. `0.1.4-dev` fade is not yet user tested; Lua 5.0.3 compiler check outstanding.
+- Runtime provenance: screenshots show `0.1.2-dev` and a later **`0.1.3-dev`** window on Vanilla 1.12.1/TortoiseBots/TBM; exact installed source SHAs not verified. New fade in `0.1.4-dev` not yet seen in-game.
 
 ## Current Design / Development Contract
 
@@ -99,6 +101,7 @@ The first `0.1.2-dev` playtest passed basic UI behaviour but exposed order-depen
 - `8274163a51fa2af04d0dca6245436218d1d52cc9` — initial stabilization verification/status handoff; verified `dev` HEAD before this update.
 - `21b24c1df7a1de63d0907d77e2928e7b0256d84a` — first runtime feedback and revised Chunk 3 direction, documentation-only.
 - `3622e360551e0ac63a9e2ec291295f8d0f567942` — order-independent persistent quest correlation, acceptance/recovery controls and `0.1.3-dev` code; **not yet tested in-game**.
+- `b5d245f4c859104be1b41033322973d551b1bc04` — **`0.1.4-dev` resolved-row-only 7+3 second fade**, leaving quest classification and original reward commands unchanged; runtime fade not yet tested.
 
 ## Completed / User-Verified
 - Fixed three-chunk scope preserved; Chunks 1 and 2 bot-attributed parser, hand-in rows, per-bot state, reward selection and exact original-link whispers remain intact.
@@ -131,6 +134,7 @@ The first `0.1.2-dev` playtest passed basic UI behaviour but exposed order-depen
 - **Chunk 3 passed:** 20 read-only source assertions, covering **byte-for-byte equality of the original parser/reward business logic after comment-only normalization**, exact linked whisper, state ownership and callback, hand-in hook initialization, 1 checkbox, tooltip payload taken from original link, per-bot link-based icons, class headers, two-axis scroll, loader/version, all new localized strings, no obvious later-Lua syntax/APIs, no speculative timeout code, and a GitHub comparison confirming only intended files changed. Total `local` tokens counted in file: 145 (a coarse source observation, **not** a Lua compiler limit proof).
 - **Lua 5.0.x compiler: NOT RUN / UNAVAILABLE here.** Host `cc` exists, but the VanillaTemplate `tools/lua50` checker is not mounted in the executable filesystem, shell GitHub access fails DNS, and no `luac5.0` or `lua5.0` exists. The GitHub connector can read sources but cannot place the vendored compiler files in this shell. The template checker's README currently identifies its vendor distribution as **Lua 5.0.2**, while the canonical rulebook refers to **5.0.3**; no checker execution or compiler pass is claimed. Do not edit the rulebook to reconcile this.
 - **2026-10-27 first stabilization checkpoint:** verified `dev` HEAD `10270cfb5cccfc7bac72e57f1f75f1d618a82fdd` and `.toc` version `0.1.2-dev`; **15/15 additional read-only source checks passed**, including loader order, metadata, hide/parse independence, objective vs turn-in distinction, `GetQuestReward` chain, untouched original-item-link whisper, ack matching, native tooltip link, auto-open and single master checkbox. These are **static checks only**, not Lua compiler or in-game runtime checks.
+- **2026-10-27 `0.1.4-dev` static verification: 17/17 targeted source assertions passed**, including unchanged parser/quest classification, original reward and manual recovery whispers, 7+3 second fade arithmetic, cancelling fades if re-opened, silent hand-in clearing, no persisting completed visual-only rows, OnUpdate cleanup, row opacity reset on UI reuse, TOC bump and no new loader. **No Lua 5.0.3 compiler or in-game test was run for the fade.**
 - **2026-10-27 `0.1.3-dev` static verification: 18/18 source assertions passed** before commit: exact original parser/filter segment preserved byte-for-byte; unchanged original item-link reward whisper/tooltip; independent persistent observations and multi-pass replay; AcceptQuest/GetQuestReward wrappers; `available` never marking accepted; Accept disabled without trustworthy quest link; Talk/Accept buttons never marking success; per-character SavedVariables; X; locale keys; TOC version/loader; no obvious later-Lua syntax. **These are source checks, not a Lua 5.0.3 compiler pass nor an execution test.**
 - **Runtime tests: user performed first partial in-game test on 2026-10-27 against `0.1.2-dev`**, showing mixed results detailed below. Assistant has no client/TortoiseBots/TBM session for independent reproduction; `0.1.3-dev` remains untested.
 - **Current stabilization code diff:** from `21b24c1` to `3622e360`, changed `QuestControl.lua`, `locales/enUS.lua`, `TortoiseBotManager-QuestControl.toc` and `README.md`; `dev_rulebook.md` untouched. Historical Chunk 3 source checks apply only to older code.
@@ -150,10 +154,16 @@ The first `0.1.2-dev` playtest passed basic UI behaviour but exposed order-depen
 4. Persist pending quests, per-bot acceptance/hand-in/reward state, original links and relevant early events via SavedVariables through reload/relog. Only remove automatically when **all tracked bots resolved**, with user-authorized row `X` override.
 5. Preserve native Vanilla 1.12.1, TBM bot attribution, hiding only recognised bot quest chat, quest-by-bot table, original reward logic and exact `r [itemlink]`. Any product code change must increment the patch `.toc` `-dev` version.
 
+## Latest Runtime Feedback — 2026-10-27 (`0.1.3-dev`)
+
+User supplied screenshot of **The Harvest Golem Mystery**. Chat displayed Reven(d)a announcing the quest available, explicitly accepting it, the player's subsequent quest acceptance, and the bot saying "I have not completed the quest". Meanwhile QuestControl presented a separate **Hand-in / Not complete / Talk** row, even though the player and bot had just picked up the quest. This is a **separate potential stage-classification bug**, not evidence that the bot failed to accept; its root cause should be investigated only when requested. User specifically requested **no other code fixes** at this point.
+
+Resolved acceptance rows disappeared immediately, leaving no useful chance to see the confirmation. **Approved narrow change:** fully resolved non-silent rows visible for 10 seconds total (7 seconds opaque, 3 seconds fade); cancel fade if row becomes unresolved; ordinary silent hand-in cleanup unchanged. An animation-only resolved row must not be saved or resurrected over reload. Version patch bump `0.1.4-dev` required; checks and in-game retest remain distinct.
+
 ## Current Issues
 - **Confirmed in-game on `0.1.2-dev`, now targeted by `0.1.3-dev` fixes:** missing acceptance visibility, reward prompts/options missing after early bot events, auto-award/completion mispairing, player-first correlation vulnerability, lost pending rows on reload. **No fixed outcome has yet been runtime-confirmed.**
 - **Cause clarified by user:** the `Mazzranache` reward miss was due to bot event sequencing ahead of the player-created row, **not** multiline parsing. The reward parser has been kept unchanged in `0.1.3-dev`; runtime retest of the corrected correlation is still needed.
-- **To verify:** optional client quest-link capture; whisper `talk`/`accept` response and range, especially game objects; SavedVariables replay without false matches; original reward links and choice ack; duplicate/late replies. No arbitrary timeout/retry selected.
+- **To verify:** narrow `0.1.4-dev` fade timing/alpha/removal and unresolved-row persistence; optional client quest-link capture; whisper `talk`/`accept` response and range, especially game objects; SavedVariables replay without false matches; original reward links and choice ack; duplicate/late replies. The user explicitly approved only the resolved-row delay; **no retry or observation timer**.
 - **Other open checks:** canonical Lua compiler check not run; tooltip, cached item textures, scrolling under load, chat filter coexistence, TBM roster timing.
 - The stabilization fixes are source-implemented in `0.1.3-dev` but **not runtime-confirmed**. Do not mark them stable until the integrated test passes.
 
@@ -175,8 +185,8 @@ The first `0.1.2-dev` playtest passed basic UI behaviour but exposed order-depen
 No fourth chunk; do not infer any untested stage from an adjacent pass.
 
 ## Planned / Next Work
-- **`0.1.3-dev` is implemented but not in-game validated.** Install exact `dev` commit, repeat acceptance-before/after-player, reward prompt vs auto-award ordering, ordinary/silent hand-ins, whisper recovery, original hyperlink choice/tooltip, reload/relog persistence, X deletion and selective chat suppression. Confirm bot and player quest stages separately.
-- Do not infer that `Talk` works with a game object or that native API exposes a quest link; no synthetic links. If runtime identifies defects, fix within Chunk 3 with a new patch `-dev` version, source checks and updated handoff. No Chunk 4.
+- **`0.1.4-dev` needs focused in-game fade validation:** both bots accepted -> row remains full opacity 7s, fades over next 3s, disappears at ~10s; one bot unconfirmed -> row remains visible/opaque; resolved reward acknowledgement -> same fade; silent assumed-success hand-in remains immediate; reload during fade does not revive completed row; manual X works. No speculative quest stage correction in this revision.
+- Separately, if explicitly requested, investigate the screenshot's incomplete-hand-in row on an active quest; do not conflate with the fade change. Continue broader `0.1.3-dev` acceptance/reward/whisper/persistence retests as useful, recording exact installed commit. No Chunk 4.
 
 ## Deferred / Out of Scope
 - No fourth chunk, server changes, prebuilt quest-chain database, auto-accept/auto-pick feature, unrelated controls, arbitrary automatic retry/timeouts, architecture splitting or changes to `dev_rulebook.md`. Original no-acceptance-UI limitation is explicitly amended only for requested acceptance status and recovery actions.
@@ -185,7 +195,7 @@ No fourth chunk; do not infer any untested stage from an adjacent pass.
 ## Release / Promotion Notes
 - `main` stays README-only; no release authorized or performed.
 - Dependencies/target: native WoW 1.12.1, Lua 5.0.3, TortoiseBots server, optional TortoiseBotsManager API for identifying/tracking bots. Missing TBM makes reliable bot identification unavailable in the existing core.
-- `dev_rulebook.md` remains unchanged. Development patch version advanced to `0.1.3-dev`; neither Lua compilation nor runtime compatibility may be claimed from source checks.
+- `dev_rulebook.md` remains unchanged. Development patch version advanced to `0.1.4-dev` for visual-only fade. Neither Lua compilation nor runtime compatibility is established by source checks.
 
 ## Exact Next Step
-**Runtime-validate the `0.1.3-dev` Chunk 3 stabilization implementation:** verify current `dev` HEAD and unchanged `dev_rulebook.md`; install the exact `.toc` `0.1.3-dev` tree in Vanilla 1.12.1 with TBM/TortoiseBots. Follow the targeted tests below, especially early bot acceptance and `Mazzranache` choice/auto-award ordering; report exact version/commit and message outcomes. Lua 5.0.3 compiler validation remains pending. Do not promote to `main`, claim stable or create Chunk 4.
+**Validate only the new `0.1.4-dev` resolved-row fade in-game:** after verifying remote `dev` HEAD and unchanged rulebook, install the patch and check 7s fully visible + 3s fade on completed acceptance/reward rows, uninterrupted display for a missing acceptance, and no persisted fading rows on reload. Do not change "Hand-in / Not complete" classification without a subsequent explicit instruction. Lua 5.0.3 compiler validation remains pending; no release/`main`/Chunk 4.
