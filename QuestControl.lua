@@ -562,7 +562,10 @@ local function createRewardButton(parent)
         if this.option then
             this.icon:SetTexture(itemTexture(this.option))
             GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(this.option.link)
+            -- The 1.12 tooltip API expects the payload within the actual
+            -- bot-supplied hyperlink, rather than formatted chat color codes.
+            local _, _, payload = string.find(this.option.link, "|H(item:[^|]+)|h")
+            GameTooltip:SetHyperlink(payload or this.option.link)
             GameTooltip:Show()
         end
     end)
