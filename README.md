@@ -8,4 +8,4 @@ Active development lives on the `dev` branch. See `dev_rulebook.md` for the copi
 
 Source template: [Seraphic8x2244/VanillaTemplate](https://github.com/Seraphic8x2244/VanillaTemplate).
 
-Status: documentation/design only; addon implementation has not started.
+Status: Chunk 1 of 3 (foundation and message handling) implemented on `dev` as `0.1.0-dev`; no runtime tests. Chunk 2 (quest/reward state) and Chunk 3 (UI/integration) remain unfinished. See `DEV_PROGRESS.md`.
