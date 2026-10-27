@@ -25,4 +25,5 @@ TortoiseBotQuestControl.L = {
     STATUS_CHOOSE = "Choose a reward",
     STATUS_AWAITING = "Awaiting bot reply",
     STATUS_RESOLVED = "Resolved",
+    STATUS_TURNED_IN = "Quest handed in",
 }

@@ -2,7 +2,7 @@
 ## Title: TortoiseBotManager-QuestControl-dev
 ## Notes: Quest message handling and bot reward selection for TortoiseBotsManager.
 ## Author: Seraphic8x2244
-## Version: 0.1.7-dev
+## Version: 0.1.8-dev
 ## OptionalDeps: TortoiseBotsManager
 ## SavedVariables: TortoiseBotQuestControlDB
 ## SavedVariablesPerCharacter: TortoiseBotQuestControlState

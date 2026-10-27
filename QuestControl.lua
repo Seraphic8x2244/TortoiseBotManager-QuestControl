@@ -549,6 +549,13 @@ local function applyObserved(observed)
     end
     if not row and (kind == "turned_in" or kind == "turned_in_reward") then
         row = findRow("handin", observed.title, observed.questId, observed.bot)
+        -- Silent hand-in rows can already have been removed. Only an
+        -- explicit linked completion deserves a visible confirmation row.
+        -- Other bots remain neutral/assumed, not falsely confirmed.
+        if not row then
+            row = newRow("handin", observed.title, observed.questId,
+                observed.questLink)
+        end
     end
     if not row then return false end
     local cell = row.bots[observed.bot]
@@ -570,6 +577,8 @@ local function applyObserved(observed)
             cell.status = "choices"
         end
     elseif kind == "turned_in" or kind == "turned_in_reward" then
+        -- Refresh the 7+3 second display if another bot confirms in time.
+        row.fadeStartedAt = nil
         cell.status = "resolved"
         cell.outcome = kind
         cell.received = observed.item
@@ -971,7 +980,12 @@ local function cellStatus(row, data)
         return "no", L.STATUS_HANDIN_FAILED
     end
     if data.status == "incomplete" then return "no", L.STATUS_INCOMPLETE end
-    if data.status == "resolved" then return "yes", L.STATUS_RESOLVED end
+    if data.status == "resolved" then
+        if data.outcome == "turned_in" or data.outcome == "turned_in_reward" then
+            return "yes", L.STATUS_TURNED_IN
+        end
+        return "yes", L.STATUS_RESOLVED
+    end
     if data.status == "choices" then return "neutral", L.STATUS_CHOOSE end
     if data.status == "awaiting_ack" then return "neutral", L.STATUS_AWAITING end
     return "neutral", L.STATUS_HANDIN_ASSUMED
@@ -994,6 +1008,12 @@ local function renderBotCell(widget, row, botName, colIndex, offset, width, heig
         or kind == "no" and "Interface\\RaidFrame\\ReadyCheck-NotReady"
         or "Interface\\RaidFrame\\ReadyCheck-Waiting")
     cell.status.tipText = tip
+    local options = data and data.rewardOptions
+    local selectable = row.stage == "reward" and options and
+        (data.status == "choices" or data.status == "awaiting_ack")
+    -- Reward choices themselves are the only controls needed in this cell.
+    -- No neutral placeholder/status icon or reserved first line.
+    if selectable then cell.status:Hide() else cell.status:Show() end
     cell.talk:Hide()
     cell.accept:Hide()
     if data and row.stage == "accept" and
@@ -1015,9 +1035,7 @@ local function renderBotCell(widget, row, botName, colIndex, offset, width, heig
         cell.talk:Show()
     end
     for _, button in ipairs(cell.icons) do button:Hide() end
-    local options = data and data.rewardOptions
-    if row.stage == "reward" and options and
-        (data.status == "choices" or data.status == "awaiting_ack") then
+    if selectable then
         local perLine = math.max(1, math.floor((width - 7) / ICON_STEP))
         for i, option in ipairs(options) do
             local button = cell.icons[i]
@@ -1028,7 +1046,7 @@ local function renderBotCell(widget, row, botName, colIndex, offset, width, heig
             button:ClearAllPoints()
             button:SetPoint("TOPLEFT", panel, "TOPLEFT",
                 4 + math.mod(i - 1, perLine) * ICON_STEP,
-                -22 - math.floor((i - 1) / perLine) * ICON_STEP)
+                -2 - math.floor((i - 1) / perLine) * ICON_STEP)
             button.rowKey, button.botName = row.key, botName
             button.optionIndex, button.option = i, option
             button.icon:SetTexture(itemTexture(option))
@@ -1099,7 +1117,7 @@ local function rowHeight(row, columns, widths)
             (cell.status == "choices" or cell.status == "awaiting_ack") then
             local perLine = math.max(1, math.floor((widths[i] - 7) / ICON_STEP))
             height = math.max(height,
-                24 + math.ceil(table.getn(cell.rewardOptions) / perLine) * ICON_STEP)
+                2 + math.ceil(table.getn(cell.rewardOptions) / perLine) * ICON_STEP)
         end
     end
     return height
@@ -1383,7 +1401,19 @@ function QC.InitUI()
         vert:SetValue(vert:GetValue() - arg1 * 35)
     end)
     local grip = iconButton(window,
-        "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up", 16, 16)
+        "Interface\\Buttons\\WHITE8X8", 16, 16)
+    -- The 1.12 client may not ship the chat-sizegrabber texture.
+    -- Use native solid-colour texels so the resize affordance is visible.
+    grip.icon:SetTexture(nil)
+    for step = 0, 2 do
+        for dot = 0, step do
+            local mark = grip:CreateTexture(nil, "ARTWORK")
+            mark:SetTexture(0.93, 0.80, 0.48, 0.95)
+            mark:SetWidth(2); mark:SetHeight(2)
+            mark:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT",
+                -2 - step * 4, 2 + dot * 4)
+        end
+    end
     grip:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -2, 2)
     grip:SetFrameLevel(window:GetFrameLevel() + 3)
     grip.tipText = "Resize"
