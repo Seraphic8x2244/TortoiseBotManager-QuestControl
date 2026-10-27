@@ -164,15 +164,24 @@ function QC.ResolveBot(sender)
     return resolveBot(sender)
 end
 
-function QC.GetHideBotQuestMessages()
+function QC.GetFilterOwnedBotMessages()
     return TortoiseBotQuestControlDB and
-        TortoiseBotQuestControlDB.hideBotQuestMessages == true or false
+        TortoiseBotQuestControlDB.filterOwnedBotMessages == true or false
 end
 
--- The checkbox changes display only; recognition and state delivery remain independent.
-function QC.SetHideBotQuestMessages(hidden)
+function QC.SetFilterOwnedBotMessages(enabled)
     if not TortoiseBotQuestControlDB then TortoiseBotQuestControlDB = {} end
-    TortoiseBotQuestControlDB.hideBotQuestMessages = hidden and true or false
+    TortoiseBotQuestControlDB.filterOwnedBotMessages = enabled and true or false
+end
+
+function QC.GetFilterOtherBotMessages()
+    return TortoiseBotQuestControlDB and
+        TortoiseBotQuestControlDB.filterOtherBotMessages == true or false
+end
+
+function QC.SetFilterOtherBotMessages(enabled)
+    if not TortoiseBotQuestControlDB then TortoiseBotQuestControlDB = {} end
+    TortoiseBotQuestControlDB.filterOtherBotMessages = enabled and true or false
 end
 
 -- This is the only delivery path for later quest-state handling.
@@ -195,9 +204,21 @@ end
 -- IMPORTANT: never call ReceiveChat here. ChatFrame_OnEvent is called once
 -- per chat frame and both hook styles may run on the same event. Parsing
 -- and state delivery instead happen once on our independent event frame.
+-- Other-bot filtering is only a template match: TBM cannot certify an
+-- unknown sender as a bot. Neither filter hides unrecognised chat.
 function QC.ShouldHideMessage(channel, message, sender)
-    return QC.GetHideBotQuestMessages() and CHANNELS[channel] and
-        resolveBot(sender) ~= nil and classify(message) ~= nil or false
+    if not CHANNELS[channel] or type(sender) ~= "string" or sender == "" or
+        not classify(message) then return false end
+    -- The bot/owner category comes exclusively from TBM's roster.
+    local manager = TortoiseBots
+    if type(manager) ~= "table" or
+        (not manager.GetRosterEntry and not manager.GetClaimedEntry) then
+        return false
+    end
+    if resolveBot(sender) then
+        return QC.GetFilterOwnedBotMessages()
+    end
+    return QC.GetFilterOtherBotMessages()
 end
 
 local function installChatVisibilityFilter()
@@ -798,7 +819,7 @@ local CLASS_COORDS = {
     PRIEST = { 0.5, 0.75, 0.25, 0.5 }, WARLOCK = { 0.75, 1, 0.25, 0.5 },
     PALADIN = { 0, 0.25, 0.5, 0.75 },
 }
-local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical, uiCheckbox
+local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical, uiCheckboxOwned, uiCheckboxOther
 local headerWidgets, rowWidgets = {}, {}
 local newestDisplayedKey = 0
 
@@ -1134,7 +1155,8 @@ function QC.RefreshUI()
     uiScroll:SetVerticalScroll(uiVertical:GetValue())
     if horizontalMax > 0 then uiHorizontal:Show() else uiHorizontal:Hide() end
     if verticalMax > 0 then uiVertical:Show() else uiVertical:Hide() end
-    uiCheckbox:SetChecked(QC.GetHideBotQuestMessages())
+    uiCheckboxOwned:SetChecked(QC.GetFilterOwnedBotMessages())
+    uiCheckboxOther:SetChecked(QC.GetFilterOtherBotMessages())
 end
 
 -- Alpha updates do not rebuild the table or mutate quest state each frame.
@@ -1247,16 +1269,27 @@ function QC.InitUI()
     scroll:SetScript("OnMouseWheel", function()
         vert:SetValue(vert:GetValue() - arg1 * 45)
     end)
-    local checkbox = CreateFrame("CheckButton", nil, window, "UICheckButtonTemplate")
-    checkbox:SetWidth(24); checkbox:SetHeight(24)
-    checkbox:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 9, 7)
-    local checkboxText = font(window, "GameFontHighlightSmall")
-    checkboxText:SetPoint("LEFT", checkbox, "RIGHT", 4, 0)
-    checkboxText:SetText(L.HIDE_BOT_QUEST_MESSAGES)
-    checkbox:SetScript("OnClick", function()
-        QC.SetHideBotQuestMessages(this:GetChecked())
+    local ownedCheckbox = CreateFrame("CheckButton", nil, window, "UICheckButtonTemplate")
+    ownedCheckbox:SetWidth(24); ownedCheckbox:SetHeight(24)
+    ownedCheckbox:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 9, 7)
+    local ownedText = font(window, "GameFontHighlightSmall")
+    ownedText:SetPoint("LEFT", ownedCheckbox, "RIGHT", 4, 0)
+    ownedText:SetText(L.FILTER_OWNED_BOT_MESSAGES)
+    ownedCheckbox:SetScript("OnClick", function()
+        QC.SetFilterOwnedBotMessages(this:GetChecked())
     end)
-    uiCheckbox = checkbox
+    uiCheckboxOwned = ownedCheckbox
+
+    local otherCheckbox = CreateFrame("CheckButton", nil, window, "UICheckButtonTemplate")
+    otherCheckbox:SetWidth(24); otherCheckbox:SetHeight(24)
+    otherCheckbox:SetPoint("LEFT", ownedText, "RIGHT", 16, 0)
+    local otherText = font(window, "GameFontHighlightSmall")
+    otherText:SetPoint("LEFT", otherCheckbox, "RIGHT", 4, 0)
+    otherText:SetText(L.FILTER_OTHER_BOT_MESSAGES)
+    otherCheckbox:SetScript("OnClick", function()
+        QC.SetFilterOtherBotMessages(this:GetChecked())
+    end)
+    uiCheckboxOther = otherCheckbox
     SLASH_TBMQ1 = "/tbmq"
     SlashCmdList["TBMQ"] = function()
         if uiWindow:IsShown() then
@@ -1295,9 +1328,16 @@ events:SetScript("OnEvent", function()
             if type(TortoiseBotQuestControlDB) ~= "table" then
                 TortoiseBotQuestControlDB = {}
             end
-            if TortoiseBotQuestControlDB.hideBotQuestMessages == nil then
-                TortoiseBotQuestControlDB.hideBotQuestMessages = true
+            -- Migrate the previous single checkbox without altering preference.
+            if TortoiseBotQuestControlDB.filterOwnedBotMessages == nil then
+                local previous = TortoiseBotQuestControlDB.hideBotQuestMessages
+                if previous == nil then previous = true end
+                TortoiseBotQuestControlDB.filterOwnedBotMessages = previous and true or false
             end
+            if TortoiseBotQuestControlDB.filterOtherBotMessages == nil then
+                TortoiseBotQuestControlDB.filterOtherBotMessages = false
+            end
+            TortoiseBotQuestControlDB.hideBotQuestMessages = nil
             QC.LoadQuestState()
             installChatVisibilityFilter()
             installQuestHooks()

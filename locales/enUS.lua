@@ -1,7 +1,8 @@
 -- QuestControl's user-facing strings for the Vanilla 1.12 window.
 TortoiseBotQuestControl = TortoiseBotQuestControl or {}
 TortoiseBotQuestControl.L = {
-    HIDE_BOT_QUEST_MESSAGES = "Hide Bot Quest Messages",
+    FILTER_OWNED_BOT_MESSAGES = "Filter Owned Bot Messages",
+    FILTER_OTHER_BOT_MESSAGES = "Filter Other Bot Messages",
     WINDOW_TITLE = "Quest Control",
     QUEST_HEADER = "Quest",
     EMPTY_ROWS = "No quests needing bot attention.",
