@@ -1438,7 +1438,7 @@ events:SetScript("OnEvent", function()
             -- Preserve the original owned/other visibility migration.
             if TortoiseBotQuestControlDB.filterOwnedBotMessages == nil then
                 local previous = TortoiseBotQuestControlDB.hideBotQuestMessages
-                if previous == nil then previous = true end
+                if previous == nil then previous = false end
                 TortoiseBotQuestControlDB.filterOwnedBotMessages = previous and true or false
             end
             if TortoiseBotQuestControlDB.filterOtherBotMessages == nil then
