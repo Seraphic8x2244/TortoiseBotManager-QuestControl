@@ -948,7 +948,7 @@ end
 
 local function createBotCell(widget)
     local panel = CreateFrame("Frame", nil, widget.frame)
-    local status = iconButton(panel, "Interface\\RaidFrame\\ReadyCheck-Waiting", 15, 15)
+    local status = iconButton(panel, ADDON_ASSETS .. "status-neutral", 15, 15)
     status:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -4)
     local talk = createActionButton(panel,
         "Interface\\GossipFrame\\GossipGossipIcon", "talk", L.ACTION_TALK)
@@ -1003,10 +1003,12 @@ local function renderBotCell(widget, row, botName, colIndex, offset, width, heig
     panel:SetWidth(width - 1); panel:SetHeight(height)
     local data = row.bots[botName]
     local kind, tip = cellStatus(row, data)
+    -- Bundle the small marks: ReadyCheck art is not reliable across
+    -- Vanilla/Turtle client builds. These never encode unconfirmed as failure.
     cell.status.icon:SetTexture(kind == "yes"
-        and "Interface\\RaidFrame\\ReadyCheck-Ready"
-        or kind == "no" and "Interface\\RaidFrame\\ReadyCheck-NotReady"
-        or "Interface\\RaidFrame\\ReadyCheck-Waiting")
+        and ADDON_ASSETS .. "status-yes"
+        or kind == "no" and ADDON_ASSETS .. "status-no"
+        or ADDON_ASSETS .. "status-neutral")
     cell.status.tipText = tip
     local options = data and data.rewardOptions
     local selectable = row.stage == "reward" and options and
@@ -1214,7 +1216,10 @@ function QC.RefreshUI()
     uiVertical:SetMinMaxValues(0, vmax)
     uiHorizontal:SetValue(math.min(uiHorizontal:GetValue(), hmax))
     uiVertical:SetValue(math.min(uiVertical:GetValue(), vmax))
-    uiScroll:SetHorizontalScroll(uiHorizontal:GetValue())
+    -- In the target 1.12 client positive horizontal offsets move this
+    -- ScrollFrame opposite the thumb. Negate to keep 0 = first column
+    -- and dragging the thumb right = revealing columns to the right.
+    uiScroll:SetHorizontalScroll(-uiHorizontal:GetValue())
     uiScroll:SetVerticalScroll(uiVertical:GetValue())
     if hmax > 0 then uiHorizontal:Show() else uiHorizontal:Hide() end
     if vmax > 0 then uiVertical:Show() else uiVertical:Hide() end
@@ -1393,7 +1398,7 @@ function QC.InitUI()
     local horiz = createScrollSlider(window, "HORIZONTAL")
     horiz:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 7, 7)
     horiz:SetScript("OnValueChanged", function()
-        scroll:SetHorizontalScroll(this:GetValue())
+        scroll:SetHorizontalScroll(-this:GetValue())
     end)
     uiHorizontal = horiz
     scroll:EnableMouseWheel(true)
@@ -1401,21 +1406,21 @@ function QC.InitUI()
         vert:SetValue(vert:GetValue() - arg1 * 35)
     end)
     local grip = iconButton(window,
-        "Interface\\Buttons\\WHITE8X8", 16, 16)
-    -- The 1.12 client may not ship the chat-sizegrabber texture.
-    -- Use native solid-colour texels so the resize affordance is visible.
-    grip.icon:SetTexture(nil)
+        "Interface\\Buttons\\WHITE8X8", 20, 20)
+    -- Contrast and thickness matter at different UI scales and pfUI skins.
+    -- All marks use the Vanilla built-in solid texture, not missing art.
+    grip.icon:SetTexture(0.05, 0.05, 0.05, 0.90)
     for step = 0, 2 do
         for dot = 0, step do
-            local mark = grip:CreateTexture(nil, "ARTWORK")
-            mark:SetTexture(0.93, 0.80, 0.48, 0.95)
-            mark:SetWidth(2); mark:SetHeight(2)
+            local mark = grip:CreateTexture(nil, "OVERLAY")
+            mark:SetTexture(1, 0.85, 0.40, 1)
+            mark:SetWidth(4); mark:SetHeight(4)
             mark:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT",
-                -2 - step * 4, 2 + dot * 4)
+                -2 - step * 5, 2 + dot * 5)
         end
     end
     grip:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -2, 2)
-    grip:SetFrameLevel(window:GetFrameLevel() + 3)
+    grip:SetFrameLevel(window:GetFrameLevel() + 6)
     grip.tipText = "Resize"
     grip:SetScript("OnMouseDown", function()
         window:StartSizing("BOTTOMRIGHT")
