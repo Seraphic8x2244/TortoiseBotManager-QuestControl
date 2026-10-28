@@ -216,7 +216,7 @@ local function isBotQuestProgress(message)
         "^(.+): (%d+)/(%d+)$")
     if objective and current and total then
         local a, b = tonumber(current), tonumber(total)
-        if a and b and b > 0 and a <= b then return true end
+        if a and b and b > 0 then return true end
     end
     -- Item objectives instead send '[questlink] - [itemlink] N/N'.
     local _, links = linksInMessage(message)
