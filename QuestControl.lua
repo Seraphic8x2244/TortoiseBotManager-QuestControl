@@ -892,6 +892,7 @@ local CLASS_COORDS = {
 local ADDON_ASSETS = "Interface\\AddOns\\TortoiseBotManager-QuestControl\\assets\\"
 local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical
 local uiCheckboxOwned, uiCheckboxOther, uiCheckboxNames, uiCheckboxProgress, uiCheckboxFade
+local uiSettings, uiHovering = nil, false
 local headerWidgets, rowWidgets = {}, {}
 local newestDisplayedKey = 0
 local questButton, questButtonHost, questButtonInfo, questButtonDrag
@@ -1222,20 +1223,53 @@ local function updateViewport()
     uiHorizontal:SetWidth(width - 5)
 end
 
+-- Mouse-over testing by screen coordinates avoids parent OnLeave firing
+-- when moving into child buttons or the settings popover. Both frame bounds
+-- and cursor coordinates are converted to the frame's effective UI scale.
+local function cursorOverQuestControl()
+    if not uiWindow or not uiWindow:IsShown() or not GetCursorPosition then
+        return false
+    end
+    local scale = uiWindow:GetEffectiveScale()
+    if not scale or scale <= 0 then return false end
+    local x, y = GetCursorPosition()
+    if not x or not y then return false end
+    x, y = x / scale, y / scale
+    local function contains(frame)
+        if not frame or not frame:IsShown() then return false end
+        local left, right = frame:GetLeft(), frame:GetRight()
+        local top, bottom = frame:GetTop(), frame:GetBottom()
+        return left and right and top and bottom
+            and x >= left and x <= right and y >= bottom and y <= top
+    end
+    return contains(uiWindow) or contains(uiSettings)
+end
+
 -- The parent dimmer is independent of each row's 7+3-second fade.
 local function refreshWindowOpacity(rows)
     if not uiWindow then return end
-    if not QC.GetFadeWhenInactive() then
-        uiWindow:SetAlpha(1)
-        return
-    end
-    for _, row in ipairs(rows) do
-        if not resolvedRow(row) then
-            uiWindow:SetAlpha(1)
-            return
+    uiHovering = cursorOverQuestControl()
+    local alpha = 1
+    if QC.GetFadeWhenInactive() and not uiHovering then
+        alpha = 0.2
+        for _, row in ipairs(rows) do
+            if not resolvedRow(row) then
+                alpha = 1
+                break
+            end
         end
     end
-    uiWindow:SetAlpha(0.2)
+    if uiWindow:GetAlpha() ~= alpha then uiWindow:SetAlpha(alpha) end
+end
+
+-- Runs with the existing event-frame update: brighten on cursor entry and
+-- restore the configured inactive alpha on exit, without re-rendering rows.
+function QC.UpdateHoverOpacity()
+    if not uiWindow or not uiWindow:IsShown()
+        or not QC.GetFadeWhenInactive() then return end
+    if cursorOverQuestControl() ~= uiHovering then
+        refreshWindowOpacity(QC.GetQuestRows())
+    end
 end
 
 function QC.RefreshUI()
@@ -1461,6 +1495,7 @@ function QC.InitUI()
     settings:SetWidth(250); settings:SetHeight(142)
     settings:SetPoint("TOPRIGHT", gear, "BOTTOMRIGHT", 0, -4)
     settings:SetFrameLevel(gear:GetFrameLevel() + 2)
+    uiSettings = settings
     panelBackdrop(settings)
     local owned = CreateFrame("CheckButton", nil, settings, "UICheckButtonTemplate")
     owned:SetWidth(20); owned:SetHeight(20)
@@ -1605,6 +1640,7 @@ end
 local events = CreateFrame("Frame", "TortoiseBotQuestControlEvents")
 events:SetScript("OnUpdate", function()
     QC.TickResolvedFades()
+    QC.UpdateHoverOpacity()
     integrationElapsed = integrationElapsed + arg1
     if integrationElapsed >= 0.75 then
         integrationElapsed = 0
