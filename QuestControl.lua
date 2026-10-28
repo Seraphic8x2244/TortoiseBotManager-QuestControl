@@ -184,6 +184,52 @@ function QC.SetFilterOtherBotMessages(enabled)
     TortoiseBotQuestControlDB.filterOtherBotMessages = enabled and true or false
 end
 
+function QC.GetHideBotNames()
+    return TortoiseBotQuestControlDB and
+        TortoiseBotQuestControlDB.hideBotNames == true or false
+end
+
+function QC.SetHideBotNames(enabled)
+    if not TortoiseBotQuestControlDB then TortoiseBotQuestControlDB = {} end
+    TortoiseBotQuestControlDB.hideBotNames = enabled and true or false
+end
+
+function QC.GetHideBotQuestProgressMessages()
+    return TortoiseBotQuestControlDB and
+        TortoiseBotQuestControlDB.hideBotQuestProgressMessages == true or false
+end
+
+function QC.SetHideBotQuestProgressMessages(enabled)
+    if not TortoiseBotQuestControlDB then TortoiseBotQuestControlDB = {} end
+    TortoiseBotQuestControlDB.hideBotQuestProgressMessages = enabled and true or false
+end
+
+-- The server's formatQuestObjective output is 'Objective: current/required'
+-- with inline colour codes; clients may also surface it without colours.
+-- These messages have no authenticated bot identity, so the new opt-in
+-- filter uses the objective format independent of TBM's owned roster.
+local function isBotQuestProgress(message)
+    if type(message) ~= "string" then return false end
+    local stripped = string.gsub(message, "|c%x%x%x%x%x%x%x%x", "")
+    stripped = string.gsub(stripped, "|r", "")
+    local objective, current, total = string.find(stripped,
+        "^(.+): (%d+)/(%d+)$")
+    if objective and current and total then
+        local a, b = tonumber(current), tonumber(total)
+        if a and b and b > 0 and a <= b then return true end
+    end
+    -- Item objectives instead send '[questlink] - [itemlink] N/N'.
+    local _, links = linksInMessage(message)
+    if table.getn(links) == 2 and links[1].kind == "quest" and
+        links[2].kind == "item" and
+        string.find(message, " %d+/%d+$") then return true end
+    return false
+end
+
+function QC.IsBotQuestProgress(message)
+    return isBotQuestProgress(message)
+end
+
 -- This is the only delivery path for later quest-state handling.
 -- It deliberately does not create rows, resolve quests or send commands yet.
 function QC.ReceiveChat(channel, message, sender)
@@ -207,8 +253,13 @@ end
 -- Other-bot filtering is only a template match: TBM cannot certify an
 -- unknown sender as a bot. Neither filter hides unrecognised chat.
 function QC.ShouldHideMessage(channel, message, sender)
-    if not CHANNELS[channel] or type(sender) ~= "string" or sender == "" or
-        not classify(message) then return false end
+    if not CHANNELS[channel] or type(sender) ~= "string" or sender == "" then
+        return false
+    end
+    -- Independent of both existing filters and all roster ownership checks.
+    if QC.GetHideBotQuestProgressMessages() and
+        isBotQuestProgress(message) then return true end
+    if not classify(message) then return false end
     -- The bot/owner category comes exclusively from TBM's roster.
     local manager = TortoiseBots
     if type(manager) ~= "table" or
@@ -813,7 +864,7 @@ end
 -- owned by the core QC functions above; the UI never parses chat itself.
 -- Compact pfQuest_Group-inspired presentation; no parser/state changes below.
 local L = QC.L
-local QUEST_W, BOT_MIN_W = 190, 122
+local QUEST_W, BOT_MIN_W, BOT_ICON_MIN_W = 190, 122, 62
 local HEADER_H, ROW_MIN = 25, 23
 local ICON_SIZE, ICON_STEP = 18, 21
 local CLASS_TOKENS = {
@@ -829,7 +880,8 @@ local CLASS_COORDS = {
     PALADIN = { 0, 0.25, 0.5, 0.75 },
 }
 local ADDON_ASSETS = "Interface\\AddOns\\TortoiseBotManager-QuestControl\\assets\\"
-local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical, uiCheckboxOwned, uiCheckboxOther
+local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical
+local uiCheckboxOwned, uiCheckboxOther, uiCheckboxNames, uiCheckboxProgress
 local headerWidgets, rowWidgets = {}, {}
 local newestDisplayedKey = 0
 local questButton, questButtonHost, questButtonInfo, questButtonDrag
@@ -1098,6 +1150,13 @@ local function renderHeader(info, index, offset, width)
         texture:SetPoint("LEFT", frame, "LEFT", 3, 0)
         local name = font(frame, "GameFontNormalSmall")
         name:SetPoint("LEFT", texture, "RIGHT", 4, 0)
+        frame:EnableMouse(false)
+        frame:SetScript("OnEnter", function()
+            GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
+            GameTooltip:SetText(this.botDisplayName or "", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
         widget = { frame = frame, texture = texture, name = name }
         headerWidgets[index] = widget
     end
@@ -1107,6 +1166,10 @@ local function renderHeader(info, index, offset, width)
     widget.name:SetWidth(width - 27); widget.name:SetHeight(20)
     widget.name:SetText(info.name)
     classAppearance(info, widget.texture, widget.name)
+    widget.frame.botDisplayName = info.name
+    local iconOnly = QC.GetHideBotNames()
+    widget.frame:EnableMouse(iconOnly)
+    if iconOnly then widget.name:Hide() else widget.name:Show() end
     widget.frame:Show()
 end
 
@@ -1153,9 +1216,25 @@ function QC.RefreshUI()
     if not uiWindow then return end
     local rows, columns = QC.GetQuestRows(), QC.GetBotColumns()
     local widths, offsets, totalWidth = {}, {}, QUEST_W
+    local iconOnly = QC.GetHideBotNames()
     for index, info in ipairs(columns) do
-        local width = math.max(BOT_MIN_W,
-            string.len(info.name or "") * 8 + 31)
+        local width
+        if iconOnly then
+            -- Retain room for the status/Talk/Accept buttons. Grow a bot
+            -- column only when its live reward options need more icon room.
+            width = BOT_ICON_MIN_W
+            for _, row in ipairs(rows) do
+                local cell = row.bots[info.name]
+                if row.stage == "reward" and cell and cell.rewardOptions and
+                    (cell.status == "choices" or cell.status == "awaiting_ack") then
+                    width = math.max(width, math.min(BOT_MIN_W,
+                        7 + table.getn(cell.rewardOptions) * ICON_STEP))
+                end
+            end
+        else
+            width = math.max(BOT_MIN_W,
+                string.len(info.name or "") * 8 + 31)
+        end
         widths[index], offsets[index] = width, totalWidth
         totalWidth = totalWidth + width
     end
@@ -1165,7 +1244,7 @@ function QC.RefreshUI()
     end
     if not uiWindow.userSized then
         local targetWidth = math.min(UIParent:GetWidth() - 28,
-            math.max(340, totalWidth + 25))
+            math.max(iconOnly and 240 or 340, totalWidth + 25))
         local targetHeight = math.min(UIParent:GetHeight() - 50,
             math.max(160, math.min(360, y + 54)))
         uiWindow:SetWidth(targetWidth)
@@ -1225,6 +1304,8 @@ function QC.RefreshUI()
     if vmax > 0 then uiVertical:Show() else uiVertical:Hide() end
     uiCheckboxOwned:SetChecked(QC.GetFilterOwnedBotMessages())
     uiCheckboxOther:SetChecked(QC.GetFilterOtherBotMessages())
+    uiCheckboxNames:SetChecked(QC.GetHideBotNames())
+    uiCheckboxProgress:SetChecked(QC.GetHideBotQuestProgressMessages())
 end
 
 function QC.RefreshRowFades(now)
@@ -1306,8 +1387,8 @@ function QC.InitUI()
     window:SetFrameStrata("DIALOG")
     window:SetMovable(true)
     window:SetResizable(true)
-    window:SetMinResize(340, 160)
-    window:SetMaxResize(math.max(340, UIParent:GetWidth() - 28),
+    window:SetMinResize(240, 160)
+    window:SetMaxResize(math.max(240, UIParent:GetWidth() - 28),
         math.max(160, UIParent:GetHeight() - 50))
     window:SetClampedToScreen(true)
     window:EnableMouse(true)
@@ -1349,9 +1430,9 @@ function QC.InitUI()
     local gear = iconButton(window, "Interface\\Icons\\INV_Gizmo_02", 16, 16)
     gear:SetPoint("RIGHT", close, "LEFT", -3, 0)
     gear:SetFrameLevel(drag:GetFrameLevel() + 2)
-    gear.tipText = "Message filters"
+    gear.tipText = L.SETTINGS_TOOLTIP
     local settings = CreateFrame("Frame", nil, window)
-    settings:SetWidth(247); settings:SetHeight(66)
+    settings:SetWidth(250); settings:SetHeight(118)
     settings:SetPoint("TOPRIGHT", gear, "BOTTOMRIGHT", 0, -4)
     settings:SetFrameLevel(gear:GetFrameLevel() + 2)
     panelBackdrop(settings)
@@ -1375,6 +1456,38 @@ function QC.InitUI()
         QC.SetFilterOtherBotMessages(this:GetChecked())
     end)
     uiCheckboxOther = other
+    local names = CreateFrame("CheckButton", nil, settings, "UICheckButtonTemplate")
+    names:SetWidth(20); names:SetHeight(20)
+    names:SetPoint("TOPLEFT", other, "BOTTOMLEFT", 0, -2)
+    local namesText = font(settings, "GameFontHighlightSmall")
+    namesText:SetPoint("LEFT", names, "RIGHT", 3, 0)
+    namesText:SetText(L.HIDE_BOT_NAMES)
+    names:SetScript("OnClick", function()
+        -- Save per-mode widths so switching back preserves manual sizing.
+        local pos = windowStore()
+        local oldMode = QC.GetHideBotNames() and "icon" or "named"
+        pos[oldMode .. "Width"] = window:GetWidth()
+        pos[oldMode .. "UserSized"] = window.userSized and true or false
+        QC.SetHideBotNames(this:GetChecked())
+        local newMode = QC.GetHideBotNames() and "icon" or "named"
+        window.userSized = pos[newMode .. "UserSized"] == true
+        if window.userSized and type(pos[newMode .. "Width"]) == "number" then
+            window:SetWidth(pos[newMode .. "Width"])
+        end
+        QC.RefreshUI()
+        saveWindow()
+    end)
+    uiCheckboxNames = names
+    local progress = CreateFrame("CheckButton", nil, settings, "UICheckButtonTemplate")
+    progress:SetWidth(20); progress:SetHeight(20)
+    progress:SetPoint("TOPLEFT", names, "BOTTOMLEFT", 0, -2)
+    local progressText = font(settings, "GameFontHighlightSmall")
+    progressText:SetPoint("LEFT", progress, "RIGHT", 3, 0)
+    progressText:SetText(L.HIDE_BOT_QUEST_PROGRESS)
+    progress:SetScript("OnClick", function()
+        QC.SetHideBotQuestProgressMessages(this:GetChecked())
+    end)
+    uiCheckboxProgress = progress
     settings:Hide()
     gear:SetScript("OnClick", function()
         if settings:IsShown() then settings:Hide() else
@@ -1480,6 +1593,12 @@ events:SetScript("OnEvent", function()
                 TortoiseBotQuestControlDB.filterOtherBotMessages = false
             end
             TortoiseBotQuestControlDB.hideBotQuestMessages = nil
+            if TortoiseBotQuestControlDB.hideBotNames == nil then
+                TortoiseBotQuestControlDB.hideBotNames = false
+            end
+            if TortoiseBotQuestControlDB.hideBotQuestProgressMessages == nil then
+                TortoiseBotQuestControlDB.hideBotQuestProgressMessages = false
+            end
             QC.LoadQuestState()
             installChatVisibilityFilter()
             installQuestHooks()
