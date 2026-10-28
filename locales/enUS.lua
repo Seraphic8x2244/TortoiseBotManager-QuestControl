@@ -5,6 +5,7 @@ TortoiseBotQuestControl.L = {
     FILTER_OTHER_BOT_MESSAGES = "Filter Other Bot Messages",
     HIDE_BOT_NAMES = "Hide bot names",
     HIDE_BOT_QUEST_PROGRESS = "Hide bot quest progress messages",
+    FADE_WHEN_INACTIVE = "Fade when inactive (20%)",
     SETTINGS_TOOLTIP = "QuestControl settings",
     WINDOW_TITLE = "Quest Control",
     QUEST_HEADER = "Quest",

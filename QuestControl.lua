@@ -204,6 +204,16 @@ function QC.SetHideBotQuestProgressMessages(enabled)
     TortoiseBotQuestControlDB.hideBotQuestProgressMessages = enabled and true or false
 end
 
+function QC.GetFadeWhenInactive()
+    return TortoiseBotQuestControlDB and
+        TortoiseBotQuestControlDB.fadeWhenInactive == true or false
+end
+
+function QC.SetFadeWhenInactive(enabled)
+    if not TortoiseBotQuestControlDB then TortoiseBotQuestControlDB = {} end
+    TortoiseBotQuestControlDB.fadeWhenInactive = enabled and true or false
+end
+
 -- The server's formatQuestObjective output is 'Objective: current/required'
 -- with inline colour codes; clients may also surface it without colours.
 -- These messages have no authenticated bot identity, so the new opt-in
@@ -881,7 +891,7 @@ local CLASS_COORDS = {
 }
 local ADDON_ASSETS = "Interface\\AddOns\\TortoiseBotManager-QuestControl\\assets\\"
 local uiWindow, uiScroll, uiContent, uiHorizontal, uiVertical
-local uiCheckboxOwned, uiCheckboxOther, uiCheckboxNames, uiCheckboxProgress
+local uiCheckboxOwned, uiCheckboxOther, uiCheckboxNames, uiCheckboxProgress, uiCheckboxFade
 local headerWidgets, rowWidgets = {}, {}
 local newestDisplayedKey = 0
 local questButton, questButtonHost, questButtonInfo, questButtonDrag
@@ -1212,6 +1222,22 @@ local function updateViewport()
     uiHorizontal:SetWidth(width - 5)
 end
 
+-- The parent dimmer is independent of each row's 7+3-second fade.
+local function refreshWindowOpacity(rows)
+    if not uiWindow then return end
+    if not QC.GetFadeWhenInactive() then
+        uiWindow:SetAlpha(1)
+        return
+    end
+    for _, row in ipairs(rows) do
+        if not resolvedRow(row) then
+            uiWindow:SetAlpha(1)
+            return
+        end
+    end
+    uiWindow:SetAlpha(0.2)
+end
+
 function QC.RefreshUI()
     if not uiWindow then return end
     local rows, columns = QC.GetQuestRows(), QC.GetBotColumns()
@@ -1306,6 +1332,8 @@ function QC.RefreshUI()
     uiCheckboxOther:SetChecked(QC.GetFilterOtherBotMessages())
     uiCheckboxNames:SetChecked(QC.GetHideBotNames())
     uiCheckboxProgress:SetChecked(QC.GetHideBotQuestProgressMessages())
+    uiCheckboxFade:SetChecked(QC.GetFadeWhenInactive())
+    refreshWindowOpacity(rows)
 end
 
 function QC.RefreshRowFades(now)
@@ -1402,9 +1430,7 @@ function QC.InitUI()
     if pfUI and pfUI.api and type(pfUI.api.CreateBackdrop) == "function" then
         pcall(pfUI.api.CreateBackdrop, window, nil, true)
     end
-    if UISpecialFrames then
-        table.insert(UISpecialFrames, "TortoiseBotQuestControlFrame")
-    end
+    -- Escape must not close this frame; close/Quest button and /tbmq still do.
     local drag = CreateFrame("Frame", nil, window)
     drag:SetPoint("TOPLEFT", window, "TOPLEFT", 0, 0)
     drag:SetPoint("TOPRIGHT", window, "TOPRIGHT", -45, 0)
@@ -1432,7 +1458,7 @@ function QC.InitUI()
     gear:SetFrameLevel(drag:GetFrameLevel() + 2)
     gear.tipText = L.SETTINGS_TOOLTIP
     local settings = CreateFrame("Frame", nil, window)
-    settings:SetWidth(250); settings:SetHeight(118)
+    settings:SetWidth(250); settings:SetHeight(142)
     settings:SetPoint("TOPRIGHT", gear, "BOTTOMRIGHT", 0, -4)
     settings:SetFrameLevel(gear:GetFrameLevel() + 2)
     panelBackdrop(settings)
@@ -1488,6 +1514,17 @@ function QC.InitUI()
         QC.SetHideBotQuestProgressMessages(this:GetChecked())
     end)
     uiCheckboxProgress = progress
+    local fade = CreateFrame("CheckButton", nil, settings, "UICheckButtonTemplate")
+    fade:SetWidth(20); fade:SetHeight(20)
+    fade:SetPoint("TOPLEFT", progress, "BOTTOMLEFT", 0, -2)
+    local fadeText = font(settings, "GameFontHighlightSmall")
+    fadeText:SetPoint("LEFT", fade, "RIGHT", 3, 0)
+    fadeText:SetText(L.FADE_WHEN_INACTIVE)
+    fade:SetScript("OnClick", function()
+        QC.SetFadeWhenInactive(this:GetChecked())
+        QC.RefreshUI()
+    end)
+    uiCheckboxFade = fade
     settings:Hide()
     gear:SetScript("OnClick", function()
         if settings:IsShown() then settings:Hide() else
@@ -1598,6 +1635,9 @@ events:SetScript("OnEvent", function()
             end
             if TortoiseBotQuestControlDB.hideBotQuestProgressMessages == nil then
                 TortoiseBotQuestControlDB.hideBotQuestProgressMessages = false
+            end
+            if TortoiseBotQuestControlDB.fadeWhenInactive == nil then
+                TortoiseBotQuestControlDB.fadeWhenInactive = false
             end
             QC.LoadQuestState()
             installChatVisibilityFilter()
