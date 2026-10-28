@@ -212,7 +212,7 @@ local function isBotQuestProgress(message)
     if type(message) ~= "string" then return false end
     local stripped = string.gsub(message, "|c%x%x%x%x%x%x%x%x", "")
     stripped = string.gsub(stripped, "|r", "")
-    local objective, current, total = string.find(stripped,
+    local _, _, objective, current, total = string.find(stripped,
         "^(.+): (%d+)/(%d+)$")
     if objective and current and total then
         local a, b = tonumber(current), tonumber(total)
