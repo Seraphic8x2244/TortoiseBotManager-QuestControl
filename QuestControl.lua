@@ -1245,19 +1245,15 @@ local function cursorOverQuestControl()
     return contains(uiWindow) or contains(uiSettings)
 end
 
--- The parent dimmer is independent of each row's 7+3-second fade.
+-- Only an empty row list is inactive. Resolved rows remain visible for
+-- their existing 7+3-second hold/fade; do not dim the parent before removal.
 local function refreshWindowOpacity(rows)
     if not uiWindow then return end
     uiHovering = cursorOverQuestControl()
     local alpha = 1
-    if QC.GetFadeWhenInactive() and not uiHovering then
+    if QC.GetFadeWhenInactive() and not uiHovering
+        and table.getn(rows) == 0 then
         alpha = 0.2
-        for _, row in ipairs(rows) do
-            if not resolvedRow(row) then
-                alpha = 1
-                break
-            end
-        end
     end
     if uiWindow:GetAlpha() ~= alpha then uiWindow:SetAlpha(alpha) end
 end
