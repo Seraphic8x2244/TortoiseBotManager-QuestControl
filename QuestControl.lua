@@ -62,7 +62,6 @@ local FORMATS = {
     { "turned_in_reward", "^I have completed the quest " .. QUEST .. " and received " .. ITEM .. "$" },
     { "turned_in", "^I have completed the quest " .. QUEST .. "$" },
     { "unable_to_turn_in", "^I am unable to turn in the quest " .. QUEST .. "$" },
-    { "incomplete", "^I have not completed the quest " .. QUEST .. "$" },
     { "available", "^Quest " .. QUEST .. " available$" },
     { "accepted", "^I have accepted " .. QUEST .. "$" },
     { "already_have", "^I already have " .. QUEST .. "$" },
@@ -587,6 +586,9 @@ end
 
 local function applyObserved(observed)
     local kind = observed.kind
+    -- Older saved pending events can predate the parser change. An unfinished
+    -- quest is not evidence of a hand-in failure; consume without action.
+    if kind == "incomplete" then return true end
     local stage
     if kind == "accepted" or kind == "available" or
         kind == "already_have" or kind == "already_completed" or
