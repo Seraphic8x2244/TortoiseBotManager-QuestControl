@@ -439,11 +439,33 @@ local function findPlayerQuestLink(title)
     return nil
 end
 
+-- Stock 1.12 uses name-based targeting. SuperWoW also returns stable GUID
+-- strings from UnitExists and accepts them in TargetUnit. Never assume GUID
+-- support on an unextended client.
+local function unitIdentity(unit)
+    if not UnitExists or not UnitName then return nil, nil end
+    local exists = UnitExists(unit)
+    if not exists then return nil, nil end
+    local name = UnitName(unit)
+    if type(name) ~= "string" or name == "" then return nil, nil end
+    local guid
+    if type(exists) == "string" then guid = exists end
+    if not guid and type(UnitGUID) == "function" then
+        guid = UnitGUID(unit)
+    end
+    return name, guid
+end
+
 local function captureInteraction()
-    -- A unit target is only a hint, not proof it supplied the quest.
-    -- Vanilla exposes no reliable targeted game-object identity here.
-    if UnitExists and UnitName and UnitExists("target") then
-        return { targetName = UnitName("target"), source = "selected unit" }
+    -- The active quest-dialogue NPC takes priority over an unrelated target.
+    -- On clients without an 'npc' unit token, retain the selected-unit hint.
+    local name, guid = unitIdentity("npc")
+    if name then
+        return { targetName = name, targetGuid = guid, source = "quest npc" }
+    end
+    name, guid = unitIdentity("target")
+    if name then
+        return { targetName = name, targetGuid = guid, source = "selected unit" }
     end
     return nil
 end
@@ -735,12 +757,125 @@ function QC.RemoveQuestRow(rowKey)
     return false
 end
 
+-- The server's QuestAction reads the master's selection when it receives
+-- 'talk', so the client must send its target update BEFORE the whisper.
+-- Keep these operations serial: overlapping clicks must not steal each
+-- other's temporary target or break TargetLastTarget restoration.
+local TALK_TARGET_DELAY = 0.25
+local talkQueue, pendingTalk = {}, nil
+
+local function talkTargetMatches(name, guid)
+    local selectedName, selectedGuid = unitIdentity("target")
+    return selectedName == name and
+        (not guid or selectedGuid == guid)
+end
+
+local function talkNotice(message)
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00QuestControl:|r " .. message)
+    end
+end
+
+local function restoreTalkTarget(job)
+    if not job.switched then return end
+    if job.hadTarget and type(TargetLastTarget) == "function" then
+        TargetLastTarget()
+    elseif not job.hadTarget and type(ClearTarget) == "function" then
+        ClearTarget()
+    end
+end
+
+local function startNextTalk()
+    while table.getn(talkQueue) > 0 do
+        local request = table.remove(talkQueue, 1)
+        local row
+        for _, candidate in ipairs(questRows) do
+            if candidate.key == request.rowKey then row = candidate; break end
+        end
+        if row and row.bots[request.botName] and
+            row.bots[request.botName].status ~= "accepted" and
+            row.bots[request.botName].status ~= "already_have" then
+            local interaction = row.interaction
+            local npcName = interaction and interaction.targetName
+            local npcGuid = interaction and interaction.targetGuid
+            if type(npcName) ~= "string" or npcName == "" then
+                -- For bot-only observations no quest giver may have been
+                -- captured. Never guess an NPC from an arbitrary target.
+                talkNotice(L.TALK_NO_NPC)
+            elseif not GetTime or not SendChatMessage then
+                return
+            else
+                local originalName = unitIdentity("target")
+                local hadTarget = originalName ~= nil
+                local switched = not talkTargetMatches(npcName, npcGuid)
+                if switched and ((hadTarget and type(TargetLastTarget) ~= "function") or
+                    (not hadTarget and type(ClearTarget) ~= "function")) then
+                    talkNotice(L.TALK_NO_RESTORE)
+                else
+                    if switched then
+                        if npcGuid and (SUPERWOW_STRING or SUPERWOW_VERSION) and
+                            type(TargetUnit) == "function" then
+                            TargetUnit(npcGuid)
+                        elseif type(TargetByName) == "function" then
+                            TargetByName(npcName, true)
+                        else
+                            talkNotice(L.TALK_NO_TARGETING)
+                            return
+                        end
+                    end
+                    pendingTalk = {
+                        rowKey = request.rowKey,
+                        botName = request.botName,
+                        npcName = npcName, npcGuid = npcGuid,
+                        startedAt = GetTime(),
+                        hadTarget = hadTarget, switched = switched,
+                    }
+                    return
+                end
+            end
+        end
+    end
+end
+
+function QC.UpdatePendingTalk()
+    if not pendingTalk then
+        if table.getn(talkQueue) > 0 then startNextTalk() end
+        return
+    end
+    if GetTime() - pendingTalk.startedAt < TALK_TARGET_DELAY then return end
+    local job = pendingTalk
+    pendingTalk = nil
+    if talkTargetMatches(job.npcName, job.npcGuid) then
+        -- The whisper goes out before restoring the previous target.
+        SendChatMessage("talk", "WHISPER", nil, job.botName)
+        restoreTalkTarget(job)
+    else
+        -- Do not whisper with a wrong target. If the user switched targets
+        -- during the delay, do not override their new selection.
+        if job.switched then
+            local currentName = unitIdentity("target")
+            if not currentName or currentName == job.npcName then
+                restoreTalkTarget(job)
+            end
+        end
+        talkNotice(L.TALK_WRONG_TARGET)
+    end
+end
+
 function QC.RecoveryTalk(rowKey, botName)
     for _, row in ipairs(questRows) do
         if row.key == rowKey and row.bots[botName] and
             row.bots[botName].status ~= "accepted" and
             row.bots[botName].status ~= "already_have" and SendChatMessage then
-            SendChatMessage("talk", "WHISPER", nil, botName)
+            if pendingTalk and pendingTalk.rowKey == rowKey and
+                pendingTalk.botName == botName then return true end
+            for _, request in ipairs(talkQueue) do
+                if request.rowKey == rowKey and request.botName == botName then
+                    return true
+                end
+            end
+            table.insert(talkQueue, { rowKey = rowKey, botName = botName })
+            if not pendingTalk then startNextTalk() end
             return true
         end
     end
@@ -1638,6 +1773,7 @@ end
 local events = CreateFrame("Frame", "TortoiseBotQuestControlEvents")
 events:SetScript("OnUpdate", function()
     QC.TickResolvedFades()
+    QC.UpdatePendingTalk()
     QC.UpdateHoverOpacity()
     integrationElapsed = integrationElapsed + arg1
     if integrationElapsed >= 0.75 then
