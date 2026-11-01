@@ -801,7 +801,7 @@ local function startNextTalk()
             if type(npcName) ~= "string" or npcName == "" then
                 -- For bot-only observations no quest giver may have been
                 -- captured. Never guess an NPC from an arbitrary target.
-                talkNotice(L.TALK_NO_NPC)
+                talkNotice(QC.L.TALK_NO_NPC)
             elseif not GetTime or not SendChatMessage then
                 return
             else
@@ -810,7 +810,7 @@ local function startNextTalk()
                 local switched = not talkTargetMatches(npcName, npcGuid)
                 if switched and ((hadTarget and type(TargetLastTarget) ~= "function") or
                     (not hadTarget and type(ClearTarget) ~= "function")) then
-                    talkNotice(L.TALK_NO_RESTORE)
+                    talkNotice(QC.L.TALK_NO_RESTORE)
                 else
                     if switched then
                         if npcGuid and (SUPERWOW_STRING or SUPERWOW_VERSION) and
@@ -819,7 +819,7 @@ local function startNextTalk()
                         elseif type(TargetByName) == "function" then
                             TargetByName(npcName, true)
                         else
-                            talkNotice(L.TALK_NO_TARGETING)
+                            talkNotice(QC.L.TALK_NO_TARGETING)
                             return
                         end
                     end
@@ -858,7 +858,7 @@ function QC.UpdatePendingTalk()
                 restoreTalkTarget(job)
             end
         end
-        talkNotice(L.TALK_WRONG_TARGET)
+        talkNotice(QC.L.TALK_WRONG_TARGET)
     end
 end
 
